@@ -44,7 +44,7 @@ export const antiSpam: LegalDoc = {
     { heading: "Clear identification", body: ["Every email must clearly identify you as the sender, include a truthful subject line and include your physical address."] },
     { heading: "Easy unsubscribing", body: ["Every campaign includes an unsubscribe link and one-click unsubscribe headers. Unsubscribe requests are honoured immediately, and you may not re-add unsubscribed contacts."] },
     { heading: "How we enforce", body: ["We monitor bounce and complaint rates, review new accounts, and may pause campaigns or suspend accounts that exceed our thresholds or break this policy."] },
-    { heading: "Reporting spam", body: ["If you received spam sent through Sendves, contact us with the full message headers and we will investigate promptly."] },
+    { heading: "Reporting spam", body: ["If you received an email you believe was sent through Sendves, contact us with the sender’s address, the subject and a copy of the message, if possible. Message headers help but are optional, and you can report even if you don’t know which platform sent it. We will investigate where appropriate."] },
   ],
 };
 

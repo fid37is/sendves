@@ -8,6 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldCheck, Users, X, type LucideIcon,
 } from "lucide-react";
 import { Logo, LogoMark } from "@/components/ui/logo";
+import { BackContext } from "@/components/layout/back-button";
 import { SIDEBAR_COOKIE } from "@/lib/ui-prefs";
 import { cn, initials } from "@/lib/utils";
 
@@ -53,6 +54,20 @@ export function AppShell({
   const activeIndex = nav.findIndex((item) => (item.href === root ? target === root : target.startsWith(item.href)));
 
   useEffect(() => setPendingHref(null), [pathname]);
+
+  // Back link: a page inside a section (a campaign, the import page) goes back to that section's
+  // list; a section's own page goes back to the home page; the home page has none.
+  const back = (() => {
+    if (!root || pathname === root) return null;
+    let section: ShellNavItem | undefined;
+    for (const item of nav) {
+      if (item.href === root) continue;
+      const inside = pathname === item.href || pathname.startsWith(`${item.href}/`);
+      if (inside && (!section || item.href.length > section.href.length)) section = item;
+    }
+    if (section && pathname !== section.href) return { href: section.href, label: section.label };
+    return { href: root, label: nav[0].label };
+  })();
 
   function toggle() {
     setCollapsed((c) => {
@@ -226,7 +241,9 @@ export function AppShell({
       ) : null}
 
       <main className={cn("transition-[padding] duration-300 ease-out", collapsed ? "lg:pl-[76px]" : "lg:pl-64")}>
-        <div key={pathname} className="animate-rise-fast mx-auto max-w-7xl px-4 py-8 sm:px-8 sm:py-10">{children}</div>
+        <div key={pathname} className="animate-rise-fast mx-auto max-w-7xl px-4 py-8 sm:px-8 sm:py-10">
+          <BackContext.Provider value={back}>{children}</BackContext.Provider>
+        </div>
       </main>
     </div>
   );

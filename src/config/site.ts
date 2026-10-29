@@ -5,7 +5,7 @@ export type NavItem = { label: string; href?: string; children?: NavChild[] };
 
 export const siteConfig = {
   name: "Sendves",
-  tagline: "Email that moves with you.",
+  tagline: "Your campaigns, on course.",
   description:
     "Sendves is a focused email campaign platform. Verify your domain, import your contacts and send campaigns with unsubscribe, bounce and compliance handling built in.",
   url: env.siteUrl,

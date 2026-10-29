@@ -1,138 +1,101 @@
 // src/components/dashboard/add-contacts-drawer.tsx
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Plus, UserPlus, X } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ClipboardPaste, Plus, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { addContactsAction } from "@/app/(dashboard)/app/contacts/actions";
+import { parsePastedContacts } from "@/lib/validation/paste-contacts";
+import { Drawer } from "@/components/dashboard/drawer";
+import { addContactsAction, type AddContactsResult } from "@/app/(dashboard)/app/contacts/actions";
 
 type Row = { id: number; firstName: string; lastName: string; email: string; error?: string };
+type Mode = "type" | "paste";
 
 const MAX_ROWS = 50;
-const ANIMATION_MS = 350; // keep in sync with the duration-[350ms] classes below
+const MAX_PASTE = 500; // keep in sync with MAX_BATCH in contacts/actions.ts
+const NEW_LIST = "__new__";
 
 const blankRow = (id: number): Row => ({ id, firstName: "", lastName: "", email: "" });
 const isBlank = (r: Row) => !r.email.trim() && !r.firstName.trim() && !r.lastName.trim();
 
-const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select, textarea, a[href], [tabindex]:not([tabindex="-1"])';
+type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /**
+   * Audience mode. Pass `lists` (and/or `newListName`) to show an "Add to" picker; the people are
+   * put in the chosen list and already-subscribed contacts are included instead of rejected.
+   */
+  lists?: { id: string; name: string }[];
+  /** Name used when "A new list" is chosen. Passing it also turns on audience mode. */
+  newListName?: string;
+  /** Pre-selected list id; leave empty to default to a new list. */
+  defaultListId?: string;
+  title?: string;
+  description?: string;
+  onAdded?: (result: AddContactsResult) => void;
+};
 
 /**
- * "Add contact" button plus a slide-over panel (rendered in a portal) for adding one or many
- * contacts at once. Closing the panel keeps the draft; Cancel or a successful save clears it.
+ * Add one or many contacts in a right-side drawer, by typing them in or pasting a list.
+ * Closing keeps the draft; Cancel or a successful save clears it. Used on the Contacts page and
+ * inside the campaign editor (audience mode).
  */
-export function AddContactsDrawer() {
+export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defaultListId, title = "Add contacts", description, onAdded }: Props) {
   const uid = useId();
+  const formId = `${uid}-form`;
   const nextId = useRef(2);
-  const triggerRef = useRef<HTMLElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [open, setOpen] = useState(false); // mounted in the DOM
-  const [visible, setVisible] = useState(false); // slid in
+  const audienceMode = lists !== undefined || newListName !== undefined;
+
+  const [mode, setMode] = useState<Mode>("type");
   const [rows, setRows] = useState<Row[]>(() => [blankRow(1)]);
+  const [pasted, setPasted] = useState("");
+  const [pasteErrors, setPasteErrors] = useState<{ email: string; message: string }[]>([]);
+  const [target, setTarget] = useState<string>(defaultListId || NEW_LIST);
   const [consent, setConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [focusRowId, setFocusRowId] = useState<number | null>(null);
+  const panelBody = useRef<HTMLDivElement | null>(null);
 
-  const filled = rows.filter((r) => !isBlank(r)).length;
+  // Each time the drawer opens, follow the caller's current choice of list.
+  useEffect(() => {
+    if (open) setTarget(defaultListId || NEW_LIST);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  const openDrawer = () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    triggerRef.current = document.activeElement as HTMLElement | null;
-    setOpen(true);
-  };
+  const parsed = useMemo(() => parsePastedContacts(pasted), [pasted]);
+  const filledRows = rows.filter((r) => !isBlank(r)).length;
+  const count = mode === "paste" ? parsed.contacts.length : filledRows;
 
-  const closeDrawer = useCallback(() => {
-    setVisible(false);
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => {
-      setOpen(false);
-      triggerRef.current?.focus?.();
-    }, ANIMATION_MS);
-  }, []);
-
-  const requestClose = () => {
-    if (!saving) closeDrawer();
-  };
+  const close = () => onOpenChange(false);
 
   const cancel = () => {
     if (saving) return;
     setRows([blankRow(nextId.current++)]);
+    setPasted("");
+    setPasteErrors([]);
     setConsent(false);
-    closeDrawer();
+    close();
   };
-
-  // Slide in one frame after mounting so the transition actually runs.
-  useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(() => {
-      setVisible(true);
-      setFocusRowId((id) => id ?? rows[0]?.id ?? null);
-    }, 16);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  // Lock page scroll while open.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
-  // Escape closes; Tab stays inside the panel.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !saving) {
-        e.preventDefault();
-        closeDrawer();
-        return;
-      }
-      if (e.key !== "Tab" || !panelRef.current) return;
-      const items = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, saving, closeDrawer]);
 
   // Focus the requested row (its email field if it has an error) and scroll it into view.
   useEffect(() => {
     if (focusRowId === null || !open) return;
-    const el = panelRef.current?.querySelector<HTMLElement>(`[data-row="${focusRowId}"]`);
+    const el = panelBody.current?.querySelector<HTMLElement>(`[data-row="${focusRowId}"]`);
     if (!el) return;
     const row = rows.find((r) => r.id === focusRowId);
-    const target = el.querySelector<HTMLInputElement>(row?.error ? "[data-field=email]" : "input");
-    target?.focus({ preventScroll: true });
+    const field = el.querySelector<HTMLInputElement>(row?.error ? "[data-field=email]" : "input");
+    field?.focus({ preventScroll: true });
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     setFocusRowId(null);
   }, [focusRowId, rows, open]);
 
-  useEffect(() => () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-  }, []);
-
   const addRow = () => {
     if (rows.length >= MAX_ROWS) {
-      toast.info(`You can add up to ${MAX_ROWS} people at a time. To add more, import a CSV.`);
+      toast.info(`Typing in is limited to ${MAX_ROWS} people. For more, paste a list.`);
       return;
     }
     const id = nextId.current++;
@@ -151,20 +114,20 @@ export function AddContactsDrawer() {
     if (e.key !== "Enter") return;
     e.preventDefault();
     const row = rows[index];
-    if (index < rows.length - 1) {
-      setFocusRowId(rows[index + 1].id);
-    } else if (row.email.trim()) {
-      addRow();
-    } else {
-      formRef.current?.requestSubmit();
-    }
+    if (index < rows.length - 1) setFocusRowId(rows[index + 1].id);
+    else if (row.email.trim()) addRow();
+    else (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
   };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (saving) return;
-    if (filled === 0) {
-      toast.error("Add at least one email address.");
+    if (count === 0) {
+      toast.error(mode === "paste" ? "Paste at least one valid email address." : "Add at least one email address.");
+      return;
+    }
+    if (mode === "paste" && count > MAX_PASTE) {
+      toast.error(`That’s more than ${MAX_PASTE} addresses. Remove some, or use Import CSV on the Contacts page.`);
       return;
     }
     if (!consent) {
@@ -172,34 +135,56 @@ export function AddContactsDrawer() {
       return;
     }
 
+    const contacts = mode === "paste" ? parsed.contacts : rows.map(({ firstName, lastName, email }) => ({ firstName, lastName, email }));
+    const audience = !audienceMode
+      ? undefined
+      : target === NEW_LIST
+        ? { newListName: newListName?.trim() || "New audience" }
+        : { listId: target };
+
     setSaving(true);
     try {
-      const res = await addContactsAction({
-        consent,
-        contacts: rows.map(({ firstName, lastName, email }) => ({ firstName, lastName, email })),
-      });
+      const res = await addContactsAction({ consent, contacts, audience });
 
-      const errorByIndex = new Map(res.rowErrors.map((x) => [x.index, x.message]));
-      const next = rows.map((r, i) => ({ ...r, error: errorByIndex.get(i) }));
-      const failed = next.filter((r) => r.error);
-
-      if (res.added === 0) {
-        setRows(next);
+      if (res.added === 0 || (res.error && !res.list && audienceMode && res.added > 0)) {
+        // Nothing usable was saved, or the people were saved but not placed in a list.
+        if (mode === "type") {
+          const byIndex = new Map(res.rowErrors.map((x) => [x.index, x.message]));
+          const next = rows.map((r, i) => ({ ...r, error: byIndex.get(i) }));
+          setRows(next);
+          const firstFailed = next.find((r) => r.error);
+          if (firstFailed) setFocusRowId(firstFailed.id);
+        } else {
+          setPasteErrors(res.rowErrors.map((x) => ({ email: contacts[x.index]?.email ?? "", message: x.message })));
+        }
         toast.error(res.error ?? "Couldn’t add the contacts. Try again.");
-        if (failed.length) setFocusRowId(failed[0].id);
         return;
       }
 
-      // Saved rows leave the form; rows that failed stay, with their reason shown inline.
-      setRows(failed.length ? failed : [blankRow(nextId.current++)]);
+      onAdded?.(res);
       if (res.message) toast.success(res.message);
-      if (failed.length) {
-        toast.warning(`${failed.length} ${failed.length === 1 ? "person needs" : "people need"} attention. Fix the highlighted ${failed.length === 1 ? "row" : "rows"} and save again.`);
-        setFocusRowId(failed[0].id);
+
+      // Saved people leave the form; the ones that failed stay, with their reason shown.
+      if (mode === "type") {
+        const byIndex = new Map(res.rowErrors.map((x) => [x.index, x.message]));
+        const failed = rows.map((r, i) => ({ ...r, error: byIndex.get(i) })).filter((r) => r.error);
+        setRows(failed.length ? failed : [blankRow(nextId.current++)]);
+        if (failed.length) {
+          toast.warning(`${failed.length} ${failed.length === 1 ? "person needs" : "people need"} attention. Fix the highlighted ${failed.length === 1 ? "row" : "rows"} and save again.`);
+          setFocusRowId(failed[0].id);
+          return;
+        }
       } else {
-        setConsent(false);
-        closeDrawer();
+        const failedEmails = new Set(res.rowErrors.map((x) => contacts[x.index]?.email).filter(Boolean));
+        setPasteErrors(res.rowErrors.map((x) => ({ email: contacts[x.index]?.email ?? "", message: x.message })));
+        setPasted(parsed.contacts.filter((c) => failedEmails.has(c.email)).map((c) => (c.firstName || c.lastName ? `${c.firstName} ${c.lastName} <${c.email}>`.trim() : c.email)).join("\n"));
+        if (failedEmails.size) {
+          toast.warning(`${failedEmails.size} ${failedEmails.size === 1 ? "address needs" : "addresses need"} attention. See the list below.`);
+          return;
+        }
       }
+      setConsent(false);
+      close();
     } catch {
       toast.error("Couldn’t add the contacts. Check your connection and try again.");
     } finally {
@@ -207,146 +192,182 @@ export function AddContactsDrawer() {
     }
   };
 
-  const titleId = `${uid}-title`;
+  const consentLabel = count > 1 ? "These people agreed to receive emails from me." : "This person agreed to receive emails from me.";
+  const submitLabel = saving ? "Saving…" : audienceMode ? (count > 1 ? `Add ${count} people` : "Add person") : count > 1 ? `Save ${count} contacts` : "Save contact";
 
   return (
+    <Drawer
+      open={open}
+      onClose={close}
+      busy={saving}
+      title={title}
+      description={description ?? (mode === "paste" ? "Paste emails, one per line. “Ada Lovelace <ada@example.com>” also works." : "Add one person or several. Press Enter in the email field to add the next one.")}
+      icon={<UserPlus className="h-5 w-5" aria-hidden="true" />}
+      footer={
+        <div className="space-y-4">
+          <label className="flex items-start gap-3 text-sm text-ink-soft">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 accent-brand-700" />
+            {consentLabel}
+          </label>
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={cancel} disabled={saving}>Cancel</Button>
+            <Button type="submit" form={formId} disabled={saving}>{submitLabel}</Button>
+          </div>
+        </div>
+      }
+    >
+      <div ref={panelBody}>
+        <form id={formId} onSubmit={onSubmit} noValidate className="space-y-4">
+          <div className="sticky -top-5 z-10 -mx-6 -mt-5 space-y-3 bg-canvas px-6 pb-3 pt-5">
+            <div role="tablist" aria-label="How to add people" className="grid grid-cols-2 gap-1 rounded-full bg-mist-100 p-1 text-sm font-semibold">
+              {([
+                ["type", "Type in", UserPlus],
+                ["paste", "Paste a list", ClipboardPaste],
+              ] as const).map(([value, label, Icon]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === value}
+                  onClick={() => setMode(value)}
+                  className={cn(
+                    "flex items-center justify-center gap-2 rounded-full px-4 py-2 transition-colors",
+                    mode === value ? "bg-white text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  )}
+                >
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </div>
+            {mode === "type" ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-ink" aria-live="polite">{rows.length} {rows.length === 1 ? "person" : "people"}</p>
+                <Button size="sm" variant="secondary" onClick={addRow} disabled={rows.length >= MAX_ROWS}>
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  Add person
+                </Button>
+              </div>
+            ) : null}
+          </div>
+
+          {audienceMode ? (
+            <Field label="Add to" htmlFor={`${uid}-target`} hint="Everyone you add goes into this list, and it becomes the campaign’s audience.">
+              <Select id={`${uid}-target`} value={target} onChange={(e) => setTarget(e.target.value)}>
+                <option value={NEW_LIST}>A new list{newListName ? `: ${newListName}` : ""}</option>
+                {(lists ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </Select>
+            </Field>
+          ) : null}
+
+          {mode === "type" ? (
+            <>
+              {rows.map((row, i) => (
+                <div
+                  key={row.id}
+                  data-row={row.id}
+                  className={cn("animate-rise-fast scroll-mt-32 rounded-2xl border bg-white p-4 shadow-sm transition-colors", row.error ? "border-danger/60" : "border-mist")}
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-xs font-bold uppercase tracking-wide text-ink-muted">Person {i + 1}</p>
+                    {rows.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => removeRow(row.id)}
+                        aria-label={`Remove person ${i + 1}`}
+                        className="rounded-full p-1.5 text-ink-muted transition-colors hover:bg-danger-soft hover:text-danger"
+                      >
+                        <X className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="First name" htmlFor={`${uid}-${row.id}-first`}>
+                      <Input id={`${uid}-${row.id}-first`} value={row.firstName} maxLength={100} autoComplete="off" onChange={(e) => updateRow(row.id, { firstName: e.target.value })} />
+                    </Field>
+                    <Field label="Last name" htmlFor={`${uid}-${row.id}-last`}>
+                      <Input id={`${uid}-${row.id}-last`} value={row.lastName} maxLength={100} autoComplete="off" onChange={(e) => updateRow(row.id, { lastName: e.target.value })} />
+                    </Field>
+                  </div>
+                  <div className="mt-4">
+                    <Field label="Email address" htmlFor={`${uid}-${row.id}-email`} error={row.error}>
+                      <Input
+                        id={`${uid}-${row.id}-email`}
+                        data-field="email"
+                        type="email"
+                        inputMode="email"
+                        autoComplete="off"
+                        value={row.email}
+                        maxLength={254}
+                        aria-invalid={row.error ? true : undefined}
+                        className={row.error ? "!border-danger focus:!ring-danger/20" : undefined}
+                        onChange={(e) => updateRow(row.id, { email: e.target.value })}
+                        onKeyDown={(e) => onEmailKeyDown(e, i)}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <div className="space-y-3">
+              <Field label="Emails" htmlFor={`${uid}-paste`}>
+                <Textarea
+                  id={`${uid}-paste`}
+                  value={pasted}
+                  onChange={(e) => { setPasted(e.target.value); setPasteErrors([]); }}
+                  placeholder={"ada@example.com\nGrace Hopper <grace@example.com>\nalan@example.com, Alan, Turing"}
+                  rows={10}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="min-h-[220px] font-mono text-[13px]"
+                />
+              </Field>
+
+              <p className="text-sm text-ink-muted" aria-live="polite">
+                {pasted.trim() === ""
+                  ? "Up to 500 addresses at a time. Names are optional."
+                  : [
+                      `${parsed.contacts.length} ${parsed.contacts.length === 1 ? "address" : "addresses"} found`,
+                      parsed.duplicates ? `${parsed.duplicates} duplicate${parsed.duplicates === 1 ? "" : "s"} ignored` : "",
+                      parsed.invalidCount ? `${parsed.invalidCount} not valid` : "",
+                    ].filter(Boolean).join(" · ")}
+              </p>
+
+              {parsed.invalidCount > 0 ? (
+                <p className="rounded-xl bg-warning-soft p-3 text-xs text-ink-soft">
+                  Skipped: {parsed.invalid.join(", ")}{parsed.invalidCount > parsed.invalid.length ? ` and ${parsed.invalidCount - parsed.invalid.length} more` : ""}
+                </p>
+              ) : null}
+              {parsed.contacts.length > MAX_PASTE ? (
+                <p className="rounded-xl bg-danger-soft p-3 text-xs text-danger">That’s more than {MAX_PASTE} addresses. Remove some, or use Import CSV on the Contacts page.</p>
+              ) : null}
+
+              {pasteErrors.length > 0 ? (
+                <ul className="space-y-1.5 rounded-xl border border-danger/40 bg-white p-3 text-xs">
+                  {pasteErrors.map((x, i) => (
+                    <li key={`${x.email}-${i}`}><span className="font-semibold text-ink">{x.email}</span> <span className="text-danger">{x.message}</span></li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          )}
+        </form>
+      </div>
+    </Drawer>
+  );
+}
+
+/** The Contacts page's "Add contact" button with its own drawer. */
+export function AddContactsButton() {
+  const [open, setOpen] = useState(false);
+  return (
     <>
-      <Button onClick={openDrawer} aria-haspopup="dialog">
+      <Button onClick={() => setOpen(true)} aria-haspopup="dialog">
         <Plus className="h-4 w-4" aria-hidden="true" />
         Add contact
       </Button>
-
-      {open && typeof document !== "undefined"
-        ? createPortal(
-            <div className="fixed inset-0 z-[90]">
-              <div
-                aria-hidden="true"
-                onClick={requestClose}
-                className={cn(
-                  "absolute inset-0 bg-night/50 backdrop-blur-[2px] transition-opacity duration-[350ms] ease-out motion-reduce:transition-none",
-                  visible ? "opacity-100" : "opacity-0",
-                )}
-              />
-
-              <div
-                ref={panelRef}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby={titleId}
-                className={cn(
-                  "absolute inset-y-0 right-0 flex w-full max-w-[34rem] flex-col bg-canvas shadow-2xl shadow-night/30 transition-transform duration-[350ms] ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none sm:rounded-l-3xl",
-                  visible ? "translate-x-0" : "translate-x-full",
-                )}
-              >
-                <div className="flex items-start justify-between gap-4 border-b border-mist px-6 py-5">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-100 ring-1 ring-accent-200">
-                      <UserPlus className="h-5 w-5 text-brand-800" aria-hidden="true" />
-                    </span>
-                    <div>
-                      <h2 id={titleId} className="text-lg font-bold text-ink">Add contacts</h2>
-                      <p className="mt-0.5 text-sm text-ink-muted">Add one person or several. Press Enter in the email field to add the next one.</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={requestClose}
-                    aria-label="Close"
-                    className="rounded-full p-2 text-ink-muted transition-colors hover:bg-mist-100 hover:text-ink"
-                  >
-                    <X className="h-5 w-5" aria-hidden="true" />
-                  </button>
-                </div>
-
-                <form ref={formRef} onSubmit={onSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
-                  <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-                    {rows.map((row, i) => (
-                      <div
-                        key={row.id}
-                        data-row={row.id}
-                        style={{ animationDelay: visible ? "0ms" : `${120 + Math.min(i, 5) * 60}ms` }}
-                        className={cn(
-                          "animate-rise-fast rounded-2xl border bg-white p-4 shadow-sm transition-colors",
-                          row.error ? "border-danger/60" : "border-mist",
-                        )}
-                      >
-                        <div className="mb-3 flex items-center justify-between">
-                          <p className="text-xs font-bold uppercase tracking-wide text-ink-muted">Person {i + 1}</p>
-                          {rows.length > 1 ? (
-                            <button
-                              type="button"
-                              onClick={() => removeRow(row.id)}
-                              aria-label={`Remove person ${i + 1}`}
-                              className="rounded-full p-1.5 text-ink-muted transition-colors hover:bg-danger-soft hover:text-danger"
-                            >
-                              <X className="h-4 w-4" aria-hidden="true" />
-                            </button>
-                          ) : null}
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <Field label="First name" htmlFor={`${uid}-${row.id}-first`}>
-                            <Input id={`${uid}-${row.id}-first`} value={row.firstName} maxLength={100} autoComplete="off" onChange={(e) => updateRow(row.id, { firstName: e.target.value })} />
-                          </Field>
-                          <Field label="Last name" htmlFor={`${uid}-${row.id}-last`}>
-                            <Input id={`${uid}-${row.id}-last`} value={row.lastName} maxLength={100} autoComplete="off" onChange={(e) => updateRow(row.id, { lastName: e.target.value })} />
-                          </Field>
-                        </div>
-                        <div className="mt-4">
-                          <Field label="Email address" htmlFor={`${uid}-${row.id}-email`} error={row.error}>
-                            <Input
-                              id={`${uid}-${row.id}-email`}
-                              data-field="email"
-                              type="email"
-                              inputMode="email"
-                              autoComplete="off"
-                              value={row.email}
-                              maxLength={254}
-                              aria-invalid={row.error ? true : undefined}
-                              className={row.error ? "!border-danger focus:!ring-danger/20" : undefined}
-                              onChange={(e) => updateRow(row.id, { email: e.target.value })}
-                              onKeyDown={(e) => onEmailKeyDown(e, i)}
-                            />
-                          </Field>
-                        </div>
-                      </div>
-                    ))}
-
-                    <button
-                      type="button"
-                      onClick={addRow}
-                      disabled={rows.length >= MAX_ROWS}
-                      className="group flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-mist px-4 py-3.5 text-sm font-semibold text-brand-800 transition-all duration-200 hover:border-brand-500 hover:bg-brand-50 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
-                    >
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-100 transition-transform duration-300 group-hover:rotate-90">
-                        <Plus className="h-4 w-4" aria-hidden="true" />
-                      </span>
-                      Add another person
-                    </button>
-                  </div>
-
-                  <div className="space-y-4 border-t border-mist bg-white px-6 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
-                    <label className="flex items-start gap-3 text-sm text-ink-soft">
-                      <input
-                        type="checkbox"
-                        checked={consent}
-                        onChange={(e) => setConsent(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 accent-brand-700"
-                      />
-                      {filled > 1 ? "These people agreed to receive emails from me." : "This person agreed to receive emails from me."}
-                    </label>
-                    <div className="flex gap-3">
-                      <Button variant="outline" onClick={cancel} disabled={saving}>Cancel</Button>
-                      <Button type="submit" className="flex-1" disabled={saving}>
-                        {saving ? "Saving…" : filled > 1 ? `Save ${filled} contacts` : "Save contact"}
-                      </Button>
-                    </div>
-                  </div>
-                </form>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      <AddContactsDrawer open={open} onOpenChange={setOpen} />
     </>
   );
 }

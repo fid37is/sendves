@@ -30,13 +30,8 @@ export async function createCampaignAction(formData: FormData) {
   redirect(page(data.id));
 }
 
-/** Saves the editor form onto a draft campaign and returns the stored row. */
-async function saveDraft(ctx: Ctx, formData: FormData) {
-  const id = text(formData, "id", 60);
-  const { data: c } = await ctx.db.from("campaigns").select("id, status").eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
-  if (!c) go("/app/campaigns", "err", "Campaign not found.");
-  if (c.status !== "draft") go(page(id), "err", "Only drafts can be edited.");
-
+/** Reads and validates the editor form into the row stored on a draft. Never redirects. */
+async function draftRow(ctx: Ctx, formData: FormData) {
   let blocksInput: unknown = [];
   try { blocksInput = JSON.parse(String(formData.get("blocks") ?? "[]")); } catch { /* treated as empty */ }
   const blocks = sanitizeBlocks(blocksInput);
@@ -57,7 +52,7 @@ async function saveDraft(ctx: Ctx, formData: FormData) {
     if (!l) listId = null;
   }
 
-  const row = {
+  return {
     name: text(formData, "name", 120) || "Untitled campaign",
     subject: text(formData, "subject", 200),
     preview_text: text(formData, "previewText", 200),
@@ -67,8 +62,38 @@ async function saveDraft(ctx: Ctx, formData: FormData) {
     blocks,
     html: renderBlocks(blocks, { preview: text(formData, "previewText", 200) }),
   };
+}
+
+/** Saves the editor form onto a draft campaign and returns the stored row. */
+async function saveDraft(ctx: Ctx, formData: FormData) {
+  const id = text(formData, "id", 60);
+  const { data: c } = await ctx.db.from("campaigns").select("id, status").eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
+  if (!c) go("/app/campaigns", "err", "Campaign not found.");
+  if (c.status !== "draft") go(page(id), "err", "Only drafts can be edited.");
+
+  const row = await draftRow(ctx, formData);
   await ctx.db.from("campaigns").update(row).eq("id", id);
   return { id, ...row };
+}
+
+export type AutosaveResult =
+  | { ok: true; savedAt: string }
+  /** `fatal` means retrying won't help (the campaign is gone or no longer a draft). */
+  | { ok: false; error: string; fatal?: boolean };
+
+/** Background save from the editor. Unlike the buttons it never redirects, so typing isn't interrupted. */
+export async function autosaveCampaignAction(formData: FormData): Promise<AutosaveResult> {
+  const ctx = await requireWorkspace("/app/campaigns");
+  const id = text(formData, "id", 60);
+  const { data: c } = await ctx.db.from("campaigns").select("id, status").eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
+  if (!c) return { ok: false, error: "This campaign no longer exists.", fatal: true };
+  if (c.status !== "draft") return { ok: false, error: "This campaign has already been sent or scheduled, so it can’t be edited.", fatal: true };
+
+  const row = await draftRow(ctx, formData);
+  // The status guard stops a late autosave from touching a campaign that was just scheduled.
+  const { error } = await ctx.db.from("campaigns").update(row).eq("id", id).eq("workspace_id", ctx.workspace.id).eq("status", "draft");
+  if (error) return { ok: false, error: "Couldn’t save your changes." };
+  return { ok: true, savedAt: new Date().toISOString() };
 }
 
 export async function saveCampaignAction(formData: FormData) {

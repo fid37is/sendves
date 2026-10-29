@@ -1,10 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { toast } from "@/components/ui/toast";
+import { AddContactsDrawer } from "@/components/dashboard/add-contacts-drawer";
+import type { AddContactsResult } from "@/app/(dashboard)/app/contacts/actions";
+import type { AutosaveResult } from "@/app/(dashboard)/app/campaigns/actions";
 import { personalize, renderBlocks, type Block } from "@/lib/email/blocks";
 import { emailTheme } from "@/config/brand";
 
@@ -14,8 +18,12 @@ type Props = {
   domains: { id: string; domain: string; status: string }[];
   lists: { id: string; name: string }[];
   workspace: { name: string; business_address: string | null };
-  actions: { save: Action; test: Action; submit: Action; remove: Action };
+  actions: { autosave: (formData: FormData) => Promise<AutosaveResult>; test: Action; submit: Action; remove: Action };
 };
+
+const AUTOSAVE_DELAY_MS = 2500; // pause after the last edit before saving
+const RETRY_DELAY_MS = 6000; // wait before retrying a failed save
+const NOT_SAVED_KEYS = new Set(["mode", "scheduledAtIso"]); // send options, not part of the draft
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const LABELS: Record<Block["type"], string> = { heading: "Heading", text: "Text", image: "Image", button: "Button", divider: "Divider", spacer: "Spacer", html: "HTML" };
@@ -31,11 +39,114 @@ function blank(type: Exclude<Block["type"], "html">): Block {
   }
 }
 
-export function CampaignEditor({ campaign, domains, lists, workspace, actions }: Props) {
+export function CampaignEditor({ campaign, domains, lists: initialLists, workspace, actions }: Props) {
   const [blocks, setBlocks] = useState<Block[]>(campaign.blocks);
+  const [lists, setLists] = useState(initialLists);
+  const [listId, setListId] = useState(campaign.list_id ?? "");
+  const [addOpen, setAddOpen] = useState(false);
+  const [audienceNote, setAudienceNote] = useState("");
+
+
+  // People added from the drawer land in a list; make that list this campaign's audience.
+  const onContactsAdded = (res: AddContactsResult) => {
+    if (!res.list) return;
+    const added = res.list;
+    setLists((ls) => (ls.some((l) => l.id === added.id) ? ls : [...ls, { id: added.id, name: added.name }]));
+    setListId(added.id);
+    setAudienceNote(`Sending to “${added.name}”, which now has ${added.count} ${added.count === 1 ? "person" : "people"}.`);
+  };
   const [previewText, setPreviewText] = useState(campaign.preview_text);
   const [mode, setMode] = useState<"now" | "later">("now");
   const [iso, setIso] = useState("");
+
+  // ── Autosave ────────────────────────────────────────────────────────────
+  // Edits are saved a couple of seconds after you stop typing. Only one save runs at a time; edits
+  // made while one is running are picked up by the next. Nothing is sent if nothing changed.
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const [tick, setTick] = useState(0); // bumped by any form input, so the effect below re-checks
+  const lastSaved = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlight = useRef(false);
+  const stopped = useRef(false); // set when retrying can't help (campaign sent or deleted elsewhere)
+  const mounted = useRef(false);
+
+  const snapshot = useCallback(() => {
+    const form = formRef.current;
+    if (!form) return null;
+    const data = new FormData(form);
+    const parts: [string, string][] = [];
+    data.forEach((v, k) => { if (typeof v === "string" && !NOT_SAVED_KEYS.has(k)) parts.push([k, v]); });
+    return { data, key: JSON.stringify(parts) };
+  }, []);
+
+  const save = useCallback(async () => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (inFlight.current || stopped.current) return;
+    const snap = snapshot();
+    if (!snap || snap.key === lastSaved.current) return;
+
+    inFlight.current = true;
+    try {
+      const res = await actions.autosave(snap.data);
+      if (res.ok) {
+        lastSaved.current = snap.key;
+        toast.success("Progress saved.");
+      } else if (res.fatal) {
+        stopped.current = true;
+        toast.error(res.error);
+      } else {
+        toast.error(`${res.error} Retrying…`);
+        timer.current = setTimeout(() => void save(), RETRY_DELAY_MS);
+      }
+    } catch {
+      toast.error("You appear to be offline. Retrying…");
+      timer.current = setTimeout(() => void save(), RETRY_DELAY_MS);
+    } finally {
+      inFlight.current = false;
+      // Anything typed while this save was running still needs saving.
+      const next = snapshot();
+      if (!stopped.current && !timer.current && next && next.key !== lastSaved.current) {
+        timer.current = setTimeout(() => void save(), AUTOSAVE_DELAY_MS);
+      }
+    }
+  }, [actions, snapshot]);
+
+  const scheduleSave = useCallback(() => {
+    if (stopped.current) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => { timer.current = null; void save(); }, AUTOSAVE_DELAY_MS);
+  }, [save]);
+
+  // The first run records what's already saved; later runs (any edit) schedule a save.
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      lastSaved.current = snapshot()?.key ?? null;
+      return;
+    }
+    scheduleSave();
+  }, [blocks, previewText, listId, tick, scheduleSave, snapshot]);
+
+  // Save straight away when the tab is hidden, and warn before leaving with unsaved edits.
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === "hidden") void save(); };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (stopped.current) return;
+      const snap = snapshot();
+      if (inFlight.current || (snap && snap.key !== lastSaved.current)) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [save, snapshot]);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   const [local, domain] = campaign.from_email.split("@");
   const patch = (id: string, p: Partial<Block>) => setBlocks((bs) => bs.map((b) => (b.id === id ? ({ ...b, ...p } as Block) : b)));
@@ -48,7 +159,8 @@ export function CampaignEditor({ campaign, domains, lists, workspace, actions }:
   }, [blocks, previewText, workspace]);
 
   return (
-    <form className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
+    <>
+    <form ref={formRef} onInput={() => setTick((t) => t + 1)} onChange={() => setTick((t) => t + 1)} className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
       <input type="hidden" name="id" value={campaign.id} />
       <input type="hidden" name="blocks" value={JSON.stringify(blocks)} />
       <input type="hidden" name="scheduledAtIso" value={iso} />
@@ -74,12 +186,19 @@ export function CampaignEditor({ campaign, domains, lists, workspace, actions }:
                 </Select>
               </div>
             </div>
-            <Field label="Audience" htmlFor="listId">
-              <Select id="listId" name="listId" defaultValue={campaign.list_id ?? ""}>
-                <option value="">All subscribed contacts</option>
-                {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </Select>
-            </Field>
+            <div>
+              <Field label="Audience" htmlFor="listId" hint={audienceNote ? undefined : "Choose who gets this campaign, or add people who aren’t on a list yet."}>
+                <Select id="listId" name="listId" value={listId} onChange={(e) => { setListId(e.target.value); setAudienceNote(""); }}>
+                  <option value="">All subscribed contacts</option>
+                  {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </Select>
+              </Field>
+              {audienceNote ? <p className="mt-1.5 text-xs font-medium text-brand-800" role="status">{audienceNote}</p> : null}
+              <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => setAddOpen(true)} aria-haspopup="dialog">
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                Add new contacts
+              </Button>
+            </div>
           </div>
         </Card>
 
@@ -137,7 +256,6 @@ export function CampaignEditor({ campaign, domains, lists, workspace, actions }:
               </Field>
             ) : null}
             <div className="flex flex-wrap gap-3">
-              <Button type="submit" formAction={actions.save} variant="outline">Save draft</Button>
               <Button type="submit" formAction={actions.test} variant="secondary">Send test to me</Button>
               <Button type="submit" formAction={actions.submit} onClick={(e) => { if (!window.confirm(mode === "now" ? "Send this campaign to your audience?" : "Schedule this campaign?")) e.preventDefault(); }}>
                 {mode === "now" ? "Send campaign" : "Schedule campaign"}
@@ -155,5 +273,17 @@ export function CampaignEditor({ campaign, domains, lists, workspace, actions }:
         </Card>
       </div>
     </form>
+
+    {/* Sibling of the form, not a child: portal events bubble through the React tree. */}
+    <AddContactsDrawer
+      open={addOpen}
+      onOpenChange={setAddOpen}
+      lists={lists}
+      newListName={`${campaign.name} audience`}
+      defaultListId={listId}
+      title="Add contacts to this campaign"
+      onAdded={onContactsAdded}
+    />
+    </>
   );
 }

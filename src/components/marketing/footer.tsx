@@ -27,7 +27,15 @@ export function SiteFooter() {
         <div className="grid gap-10 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Logo />
-            <p className="mt-4 max-w-xs text-sm text-ink-soft">{siteConfig.tagline} Focused email campaigns with deliverability and compliance built in.</p>
+            <div className="mt-4 max-w-xs">
+              <p className="text-sm font-medium text-ink">
+                {siteConfig.tagline}
+              </p>
+
+              <p className="mt-2 text-sm text-ink-soft">
+                Focused email campaigns with deliverability and compliance built in.
+              </p>
+            </div>
             <ButtonLink href="/register" className="mt-6">Start with free plan</ButtonLink>
           </div>
           <Column title="Product" links={siteConfig.footer.product} />

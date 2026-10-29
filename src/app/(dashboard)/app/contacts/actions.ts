@@ -19,6 +19,11 @@ async function remainingRoom(ctx: Awaited<ReturnType<typeof requireWorkspace>>) 
 export type AddContactsInput = {
   consent: boolean;
   contacts: { firstName: string; lastName: string; email: string }[];
+  /**
+   * Optional. Puts the people into a list so they can be chosen as a campaign audience.
+   * With an audience, people who are already subscribed contacts are included instead of rejected.
+   */
+  audience?: { listId: string } | { newListName: string };
 };
 export type AddContactsResult = {
   added: number;
@@ -26,9 +31,27 @@ export type AddContactsResult = {
   error?: string;
   /** `index` is the position in the submitted `contacts` array. */
   rowErrors: { index: number; message: string }[];
+  /** Set when an audience was requested: the list the people are now in. */
+  list?: { id: string; name: string; count: number };
 };
 
-const MAX_BATCH = 50;
+const MAX_BATCH = 500;
+
+/** Finds the requested list, or creates one (adding " (2)", " (3)"… if the name is taken). */
+async function resolveAudienceList(ctx: Awaited<ReturnType<typeof requireWorkspace>>, audience: NonNullable<AddContactsInput["audience"]>) {
+  if ("listId" in audience) {
+    const { data } = await ctx.db.from("lists").select("id, name").eq("id", String(audience.listId)).eq("workspace_id", ctx.workspace.id).maybeSingle();
+    return data as { id: string; name: string } | null;
+  }
+  const base = String(audience.newListName ?? "").trim().slice(0, 70) || "New audience";
+  for (let n = 1; n <= 20; n++) {
+    const name = n === 1 ? base : `${base} (${n})`;
+    const { data, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name }).select("id, name").single();
+    if (!error && data) return data as { id: string; name: string };
+    if (error?.code !== "23505") return null;
+  }
+  return null;
+}
 
 /** Adds one or several contacts in a single save. Problem rows are reported back; the rest are saved. */
 export async function addContactsAction(input: AddContactsInput): Promise<AddContactsResult> {
@@ -70,38 +93,62 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
 
   const emails = candidates.map((c) => c.email);
   const [{ data: blocked }, { data: existing }] = await Promise.all([
-    ctx.db.from("suppression_entries").select("email").is("workspace_id", null).in("email", emails),
-    ctx.db.from("contacts").select("email").eq("workspace_id", ctx.workspace.id).in("email", emails),
+    // Platform-wide blocks plus this workspace's own (e.g. people who unsubscribed from you).
+    ctx.db.from("suppression_entries").select("email").or(`workspace_id.is.null,workspace_id.eq.${ctx.workspace.id}`).in("email", emails),
+    ctx.db.from("contacts").select("id, email, status").eq("workspace_id", ctx.workspace.id).in("email", emails),
   ]);
   const blockedSet = new Set((blocked ?? []).map((b: { email: string }) => b.email.toLowerCase()));
-  const existingSet = new Set((existing ?? []).map((x: { email: string }) => x.email.toLowerCase()));
+  type Known = { id: string; email: string; status: string };
+  const existingByEmail = new Map<string, Known>((existing ?? []).map((x: Known) => [x.email.toLowerCase(), x] as const));
+  const withAudience = !!input.audience;
 
   const toInsert: Candidate[] = [];
+  const alreadyThere: { id: string }[] = []; // existing subscribed contacts to include in the audience
   for (const c of candidates) {
-    if (blockedSet.has(c.email)) rowErrors.push({ index: c.index, message: "This address previously bounced or reported spam, so it can’t be added." });
-    else if (existingSet.has(c.email)) rowErrors.push({ index: c.index, message: "Already in your contacts." });
+    const known = existingByEmail.get(c.email);
+    if (blockedSet.has(c.email)) rowErrors.push({ index: c.index, message: "This address previously bounced, reported spam or unsubscribed, so it can’t be emailed." });
+    else if (known && withAudience && known.status === "subscribed") alreadyThere.push({ id: known.id });
+    else if (known && withAudience) rowErrors.push({ index: c.index, message: `Already in your contacts as ${known.status}, so it can’t be emailed.` });
+    else if (known) rowErrors.push({ index: c.index, message: "Already in your contacts." });
     else if (toInsert.length >= room) rowErrors.push({ index: c.index, message: "Your plan’s contact limit was reached. Upgrade to add more." });
     else toInsert.push(c);
   }
 
-  if (toInsert.length === 0) return fail("None of these contacts could be added. Check the highlighted rows.");
+  if (toInsert.length === 0 && alreadyThere.length === 0) return fail("None of these contacts could be added. Check the highlighted rows.");
 
   const now = new Date().toISOString();
-  const { error } = await ctx.db.from("contacts").insert(
-    toInsert.map((c) => ({
-      workspace_id: ctx.workspace.id, email: c.email, first_name: c.first_name, last_name: c.last_name,
-      source: "manual", consented_at: now,
-    })),
-  );
-  if (error) return fail(error.code === "23505" ? "Some of these contacts already exist. Review them and try again." : "Couldn’t add the contacts. Try again.");
+  let insertedIds: { id: string }[] = [];
+  if (toInsert.length > 0) {
+    const { data: inserted, error } = await ctx.db.from("contacts").insert(
+      toInsert.map((c) => ({
+        workspace_id: ctx.workspace.id, email: c.email, first_name: c.first_name, last_name: c.last_name,
+        source: withAudience ? "campaign audience" : "manual", consented_at: now,
+      })),
+    ).select("id");
+    if (error) return fail(error.code === "23505" ? "Some of these contacts already exist. Review them and try again." : "Couldn’t add the contacts. Try again.");
+    insertedIds = inserted ?? [];
+  }
+
+  let list: AddContactsResult["list"];
+  if (input.audience) {
+    const target = await resolveAudienceList(ctx, input.audience);
+    if (!target) return { added: toInsert.length, error: "The contacts were saved, but we couldn’t put them in a list. Choose a list and try again.", rowErrors };
+    const members = [...insertedIds, ...alreadyThere].map((m) => ({ list_id: target.id, contact_id: m.id }));
+    const { error: memberError } = await ctx.db.from("list_members").upsert(members, { onConflict: "list_id,contact_id", ignoreDuplicates: true });
+    if (memberError) return { added: toInsert.length, error: "The contacts were saved, but we couldn’t put them in the list. Try again.", rowErrors };
+    const { count } = await ctx.db.from("list_members").select("contact_id", { count: "exact", head: true }).eq("list_id", target.id);
+    list = { id: target.id, name: target.name, count: count ?? members.length };
+    revalidatePath("/app/lists");
+  }
 
   revalidatePath("/app/contacts");
   const roles = toInsert.filter((c) => c.role).length;
   const message = [
-    `${toInsert.length} ${toInsert.length === 1 ? "contact" : "contacts"} added`,
+    toInsert.length ? `${toInsert.length} ${toInsert.length === 1 ? "contact" : "contacts"} added` : "",
+    alreadyThere.length ? `${alreadyThere.length} already in your contacts` : "",
     roles ? `${roles} role ${roles === 1 ? "address" : "addresses"} like info@ (they often perform poorly)` : "",
-  ].filter(Boolean).join(", ") + ".";
-  return { added: toInsert.length, message, rowErrors };
+  ].filter(Boolean).join(", ") + (list ? ` · audience: ${list.name}.` : ".");
+  return { added: toInsert.length + alreadyThere.length, message, rowErrors, list };
 }
 
 export async function importContactsAction(formData: FormData) {

@@ -18,8 +18,8 @@ export default function ContactPage() {
               <a className="mt-2 block font-semibold text-brand-800 hover:underline" href={`mailto:${siteConfig.supportEmail}`}>{siteConfig.supportEmail}</a>
             </div>
             <div className="rounded-3xl bg-mist-50 p-7">
-              <h2 className="text-lg font-bold text-ink">Reporting abuse</h2>
-              <p className="mt-2 text-sm text-ink-soft">Received unwanted email sent through Sendves? Choose “Report abuse” in the form and include the full message headers.</p>
+              <h2 className="text-lg font-bold text-ink">Report email abuse</h2>
+              <p className="mt-2 text-sm text-ink-soft">Received an email you believe may have been sent using Sendves? Report it here, even if you don’t recognize the sending platform. Include the sender’s address and a copy of the message, if possible. Our team will review the report and investigate where appropriate.</p>
             </div>
           </div>
         </div>

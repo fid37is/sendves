@@ -11,7 +11,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
 import { getContacts } from "@/lib/queries";
 import { getContext } from "@/lib/workspace";
-import { AddContactsDrawer } from "@/components/dashboard/add-contacts-drawer";
+import { AddContactsButton } from "@/components/dashboard/add-contacts-drawer";
 
 export const metadata: Metadata = { title: "Contacts" };
 
@@ -31,7 +31,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
           <div className="flex flex-wrap gap-3">
             <a href="/api/contacts/export" className={buttonStyles({ variant: "outline" })}><Download className="h-4 w-4" aria-hidden="true" />Export</a>
             <ButtonLink href="/app/contacts/import" variant="outline"><Upload className="h-4 w-4" aria-hidden="true" />Import CSV</ButtonLink>
-            <AddContactsDrawer />
+            <AddContactsButton />
           </div>
         }
       />
