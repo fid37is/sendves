@@ -1,16 +1,17 @@
+// src/app/(dashboard)/app/contacts/page.tsx
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Download, Upload } from "lucide-react";
-import { ButtonLink, Button } from "@/components/ui/button";
-import { Card, CardHeader } from "@/components/ui/card";
+import { ButtonLink, Button, buttonStyles } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import type { SearchParams } from "@/types";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/badge";
 import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
 import { getContacts } from "@/lib/queries";
 import { getContext } from "@/lib/workspace";
-import { addContactAction } from "./actions";
+import { AddContactsDrawer } from "@/components/dashboard/add-contacts-drawer";
 
 export const metadata: Metadata = { title: "Contacts" };
 
@@ -27,9 +28,10 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
         title="Contacts"
         description="Everyone you email, with their current status."
         action={
-          <div className="flex gap-3">
-            <a href="/api/contacts/export" className="inline-flex h-11 items-center gap-2 rounded-full border border-mist px-5 text-sm font-semibold text-ink hover:bg-mist-50"><Download className="h-4 w-4" aria-hidden="true" />Export</a>
-            <ButtonLink href="/app/contacts/import"><Upload className="h-4 w-4" aria-hidden="true" />Import CSV</ButtonLink>
+          <div className="flex flex-wrap gap-3">
+            <a href="/api/contacts/export" className={buttonStyles({ variant: "outline" })}><Download className="h-4 w-4" aria-hidden="true" />Export</a>
+            <ButtonLink href="/app/contacts/import" variant="outline"><Upload className="h-4 w-4" aria-hidden="true" />Import CSV</ButtonLink>
+            <AddContactsDrawer />
           </div>
         }
       />
@@ -54,7 +56,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
                 <TD>{c.added}</TD>
               </tr>
             ))}
-            {rows.length === 0 ? <EmptyRow cols={4} message="No contacts yet. Import a CSV or add a contact below." /> : null}
+            {rows.length === 0 ? <EmptyRow cols={4} message="No contacts yet. Import a CSV or use Add contact to get started." /> : null}
           </tbody>
         </Table>
         {pages > 1 ? (
@@ -66,22 +68,6 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
             </span>
           </div>
         ) : null}
-      </Card>
-
-      <Card className="mt-8 max-w-2xl">
-        <CardHeader title="Add one contact" />
-        <form action={addContactAction} className="space-y-5 p-6">
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="First name" htmlFor="firstName"><Input id="firstName" name="firstName" /></Field>
-            <Field label="Last name" htmlFor="lastName"><Input id="lastName" name="lastName" /></Field>
-          </div>
-          <Field label="Email address" htmlFor="email"><Input id="email" name="email" type="email" required /></Field>
-          <label className="flex items-start gap-3 text-sm text-ink-soft">
-            <input type="checkbox" name="consent" className="mt-0.5 h-4 w-4 accent-brand-700" required />
-            This person agreed to receive emails from me.
-          </label>
-          <Button type="submit">Add contact</Button>
-        </form>
       </Card>
     </>
   );

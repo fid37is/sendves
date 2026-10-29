@@ -59,8 +59,8 @@ export default async function OverviewPage(_props: { searchParams: SearchParams 
               ariaLabel="Clicks and unique clickers per day over the last 30 days"
               dates={o.series.map((d) => d.date)}
               series={[
-                { key: "clicks", label: "Clicks", color: "#FF0000", values: o.series.map((d) => d.clicks), area: true },
-                { key: "unique", label: "Unique clickers", color: "#0B1233", values: o.series.map((d) => d.uniqueClicks), dashed: true },
+                { key: "clicks", label: "Clicks", tone: "brand", values: o.series.map((d) => d.clicks), area: true },
+                { key: "unique", label: "Unique clickers", tone: "accent", values: o.series.map((d) => d.uniqueClicks), dashed: true },
               ]}
             />
           </div>
