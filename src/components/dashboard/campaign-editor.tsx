@@ -1,70 +1,120 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Trash2, UserPlus } from "lucide-react";
+import { BookmarkPlus, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
-import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
+import { cn } from "@/lib/utils";
 import { AddContactsDrawer } from "@/components/dashboard/add-contacts-drawer";
+import { BlockEditor, useVariableInsert } from "@/components/dashboard/block-editor";
+import { EmailPreviewCard } from "@/components/dashboard/email-preview";
+import { PersonalizeCard, SAMPLE_ID } from "@/components/dashboard/personalize-card";
 import type { AddContactsResult } from "@/app/(dashboard)/app/contacts/actions";
-import type { AutosaveResult } from "@/app/(dashboard)/app/campaigns/actions";
-import { personalize, renderBlocks, type Block } from "@/lib/email/blocks";
-import { emailTheme } from "@/config/brand";
+import type { AutosaveResult, PreviewContact } from "@/app/(dashboard)/app/campaigns/actions";
+import type { SaveTemplateResult } from "@/app/(dashboard)/app/templates/actions";
+import type { AudienceOption } from "@/lib/queries";
+import { type Block } from "@/lib/email/blocks";
+import { buildPreviewDoc, previewSubject, SAMPLE_VARS } from "@/lib/email/preview";
 
 type Action = (formData: FormData) => Promise<void>;
 type Props = {
   campaign: { id: string; name: string; subject: string; preview_text: string; from_name: string; from_email: string; list_id: string | null; blocks: Block[] };
   domains: { id: string; domain: string; status: string }[];
-  lists: { id: string; name: string }[];
+  lists: AudienceOption[];
+  /** Everyone subscribed in the workspace: the size of "All subscribed contacts". */
+  totalSubscribed: number;
   workspace: { name: string; business_address: string | null };
-  actions: { autosave: (formData: FormData) => Promise<AutosaveResult>; test: Action; submit: Action; remove: Action };
+  actions: {
+    autosave: (formData: FormData) => Promise<AutosaveResult>;
+    test: Action; submit: Action; remove: Action;
+    saveTemplate: (input: { name: string; subject: string; previewText: string; blocks: unknown }) => Promise<SaveTemplateResult>;
+    previewContacts: (listId: string) => Promise<PreviewContact[]>;
+    audienceOptions: () => Promise<{ lists: AudienceOption[]; totalSubscribed: number }>;
+  };
 };
 
 const AUTOSAVE_DELAY_MS = 2500; // pause after the last edit before saving
 const RETRY_DELAY_MS = 6000; // wait before retrying a failed save
 const NOT_SAVED_KEYS = new Set(["mode", "scheduledAtIso"]); // send options, not part of the draft
 
-const uid = () => Math.random().toString(36).slice(2, 10);
-const LABELS: Record<Block["type"], string> = { heading: "Heading", text: "Text", image: "Image", button: "Button", divider: "Divider", spacer: "Spacer", html: "HTML" };
-
-function blank(type: Exclude<Block["type"], "html">): Block {
-  switch (type) {
-    case "heading": return { id: uid(), type, text: "Your headline" };
-    case "text": return { id: uid(), type, text: "Hi {{first_name|there}},\n\nWrite your message here." };
-    case "image": return { id: uid(), type, url: "https://", alt: "" };
-    case "button": return { id: uid(), type, label: "Learn more", url: "https://" };
-    case "divider": return { id: uid(), type };
-    case "spacer": return { id: uid(), type, height: 24 };
-  }
-}
-
-export function CampaignEditor({ campaign, domains, lists: initialLists, workspace, actions }: Props) {
+export function CampaignEditor({ campaign, domains, lists: initialLists, totalSubscribed: initialTotal, workspace, actions }: Props) {
   const confirm = useConfirm();
   const [blocks, setBlocks] = useState<Block[]>(campaign.blocks);
   const [lists, setLists] = useState(initialLists);
+  const [totalSubscribed, setTotalSubscribed] = useState(initialTotal);
   const [listId, setListId] = useState(campaign.list_id ?? "");
   const [addOpen, setAddOpen] = useState(false);
-  const [audienceNote, setAudienceNote] = useState("");
-
-
-  // People added from the drawer land in a list; make that list this campaign's audience.
-  const onContactsAdded = (res: AddContactsResult) => {
-    if (!res.list) return;
-    const added = res.list;
-    setLists((ls) => (ls.some((l) => l.id === added.id) ? ls : [...ls, { id: added.id, name: added.name }]));
-    setListId(added.id);
-    setAudienceNote(`Sending to “${added.name}”, which now has ${added.count} ${added.count === 1 ? "person" : "people"}.`);
-  };
+  const [subject, setSubject] = useState(campaign.subject);
   const [previewText, setPreviewText] = useState(campaign.preview_text);
   const [mode, setMode] = useState<"now" | "later">("now");
   const [iso, setIso] = useState("");
 
+  // Who will receive this campaign, and how many people that is (subscribed contacts only).
+  const selectedList = lists.find((l) => l.id === listId) ?? null;
+  const audienceName = selectedList ? selectedList.name : "All subscribed contacts";
+  const audienceLabel = selectedList ? `“${selectedList.name}”` : "all subscribed contacts";
+  const audienceCount = selectedList ? selectedList.subscribed : totalSubscribed;
+  const people = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "person" : "people"}`;
+
+  // People added from the drawer land in a list: refresh the sizes and make that list this campaign's audience.
+  const onContactsAdded = async (res: AddContactsResult) => {
+    if (!res.list) return;
+    const added = res.list;
+    try {
+      const fresh = await actions.audienceOptions();
+      setLists(fresh.lists);
+      setTotalSubscribed(fresh.totalSubscribed);
+    } catch {
+      setLists((ls) => (ls.some((l) => l.id === added.id) ? ls : [...ls, { id: added.id, name: added.name, subscribed: added.count }]));
+    }
+    setListId(added.id);
+  };
+
+  // ── Personalisation ─────────────────────────────────────────────────────
+  // Real people from the chosen audience, so the preview can be filled in as any of them.
+  const { onFocusCapture, insert } = useVariableInsert();
+  const [contacts, setContacts] = useState<PreviewContact[] | undefined>(undefined);
+  const [previewAs, setPreviewAs] = useState(SAMPLE_ID);
+  const { previewContacts } = actions;
+  useEffect(() => {
+    let cancelled = false;
+    previewContacts(listId)
+      .then((rows) => {
+        if (cancelled) return;
+        setContacts(rows);
+        setPreviewAs((cur) => (rows.some((r) => r.id === cur) ? cur : SAMPLE_ID));
+      })
+      .catch(() => { if (!cancelled) setContacts((c) => c ?? []); });
+    return () => { cancelled = true; };
+  }, [listId, audienceCount, previewContacts]);
+  const chosen = contacts?.find((c) => c.id === previewAs) ?? null;
+  const vars = useMemo(() => (chosen ? { first_name: chosen.first_name, last_name: chosen.last_name, email: chosen.email } : SAMPLE_VARS), [chosen]);
+
+  const formRef = useRef<HTMLFormElement | null>(null);
+
+  // ── Save as template ────────────────────────────────────────────────────
+  const [tplName, setTplName] = useState("");
+  const [savingTpl, setSavingTpl] = useState(false);
+  const saveAsTemplate = async () => {
+    if (savingTpl) return;
+    const campaignName = (formRef.current?.elements.namedItem("name") as HTMLInputElement | null)?.value ?? "";
+    setSavingTpl(true);
+    try {
+      const res = await actions.saveTemplate({ name: tplName.trim() || campaignName.trim(), subject, previewText, blocks });
+      if (res.ok) { toast.success(`Saved “${res.name}” to your templates.`); setTplName(""); } else toast.error(res.error);
+    } catch {
+      toast.error("Couldn’t save the template. Check your connection and try again.");
+    } finally {
+      setSavingTpl(false);
+    }
+  };
+
   // ── Autosave ────────────────────────────────────────────────────────────
   // Edits are saved a couple of seconds after you stop typing. Only one save runs at a time; edits
   // made while one is running are picked up by the next. Nothing is sent if nothing changed.
-  const formRef = useRef<HTMLFormElement | null>(null);
   const [tick, setTick] = useState(0); // bumped by any form input, so the effect below re-checks
   const lastSaved = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -151,18 +201,24 @@ export function CampaignEditor({ campaign, domains, lists: initialLists, workspa
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   const [local, domain] = campaign.from_email.split("@");
-  const patch = (id: string, p: Partial<Block>) => setBlocks((bs) => bs.map((b) => (b.id === id ? ({ ...b, ...p } as Block) : b)));
-  const move = (i: number, d: -1 | 1) =>
-    setBlocks((bs) => { const n = [...bs]; const j = i + d; if (j < 0 || j >= n.length) return bs; [n[i], n[j]] = [n[j], n[i]]; return n; });
 
-  const srcDoc = useMemo(() => {
-    const footer = `<p style="margin:16px 0 0;font-size:12px;color:${emailTheme.muted};text-align:center;">You are receiving this email because you subscribed to ${workspace.name.replace(/</g, "")}.<br><u>Unsubscribe</u><br>${(workspace.business_address ?? "Your business address").replace(/</g, "")}</p>`;
-    return personalize(renderBlocks(blocks, { preview: previewText }), { first_name: "Ada" }).replace("<!--FOOTER-->", footer);
-  }, [blocks, previewText, workspace]);
+  const srcDoc = useMemo(
+    () => buildPreviewDoc(blocks, { preview: previewText, workspaceName: workspace.name, businessAddress: workspace.business_address, vars }),
+    [blocks, previewText, workspace, vars],
+  );
+  const previewName = chosen ? [chosen.first_name, chosen.last_name].filter(Boolean).join(" ") || chosen.email : "";
 
   return (
     <>
-    <form ref={formRef} onInput={() => setTick((t) => t + 1)} onChange={() => setTick((t) => t + 1)} className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
+    <form
+      ref={formRef}
+      onInput={() => setTick((t) => t + 1)}
+      onChange={() => setTick((t) => t + 1)}
+      onFocusCapture={onFocusCapture}
+      // Enter in a text field must not submit the form: the first submit button is "Send test to me".
+      onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") e.preventDefault(); }}
+      className="grid gap-6 xl:grid-cols-[1.1fr_1fr]"
+    >
       <input type="hidden" name="id" value={campaign.id} />
       <input type="hidden" name="blocks" value={JSON.stringify(blocks)} />
       <input type="hidden" name="scheduledAtIso" value={iso} />
@@ -172,9 +228,9 @@ export function CampaignEditor({ campaign, domains, lists: initialLists, workspa
           <CardHeader title="Details" />
           <div className="space-y-5 p-6">
             <Field label="Campaign name" htmlFor="name" hint="Only you see this."><Input id="name" name="name" defaultValue={campaign.name} /></Field>
-            <Field label="Subject line" htmlFor="subject" hint="You can use {{first_name|there}}."><Input id="subject" name="subject" defaultValue={campaign.subject} /></Field>
+            <Field label="Subject line" htmlFor="subject" hint="You can use {{first_name|there}}."><Input id="subject" name="subject" data-var="true" value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
             <Field label="Preview text" htmlFor="previewText" hint="The short line shown beside the subject in many inboxes.">
-              <Input id="previewText" name="previewText" value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
+              <Input id="previewText" name="previewText" data-var="true" value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
             </Field>
             <Field label="From name" htmlFor="fromName"><Input id="fromName" name="fromName" defaultValue={campaign.from_name} /></Field>
             <div>
@@ -189,13 +245,29 @@ export function CampaignEditor({ campaign, domains, lists: initialLists, workspa
               </div>
             </div>
             <div>
-              <Field label="Audience" htmlFor="listId" hint={audienceNote ? undefined : "Choose who gets this campaign, or add people who aren’t on a list yet."}>
-                <Select id="listId" name="listId" value={listId} onChange={(e) => { setListId(e.target.value); setAudienceNote(""); }}>
-                  <option value="">All subscribed contacts</option>
-                  {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              <Field label="Audience" htmlFor="listId" hint="Choose who gets this campaign, or add people who aren’t on a list yet.">
+                <Select id="listId" name="listId" value={listId} onChange={(e) => setListId(e.target.value)}>
+                  <option value="">All subscribed contacts ({totalSubscribed.toLocaleString("en-US")})</option>
+                  {lists.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.subscribed.toLocaleString("en-US")})</option>)}
                 </Select>
               </Field>
-              {audienceNote ? <p className="mt-1.5 text-xs font-medium text-brand-800" role="status">{audienceNote}</p> : null}
+              <div
+                role="status"
+                aria-live="polite"
+                className={cn("mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-4 py-3 text-sm text-ink", audienceCount === 0 ? "border-warning/30 bg-warning-soft" : "border-brand-200 bg-brand-50")}
+              >
+                <Users className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
+                <span>
+                  Sending to <strong className="font-bold">{audienceName}</strong>
+                  {" · "}
+                  {audienceCount === 0 ? "no subscribed contacts yet. Add people below." : people(audienceCount)}
+                </span>
+                {selectedList ? (
+                  <button type="button" onClick={() => setListId("")} className="ml-auto text-xs font-semibold text-brand-800 underline underline-offset-2 hover:text-brand-900">
+                    Use all contacts
+                  </button>
+                ) : null}
+              </div>
               <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => setAddOpen(true)} aria-haspopup="dialog">
                 <UserPlus className="h-4 w-4" aria-hidden="true" />
                 Add new contacts
@@ -204,50 +276,32 @@ export function CampaignEditor({ campaign, domains, lists: initialLists, workspa
           </div>
         </Card>
 
+        <PersonalizeCard onInsert={insert} contacts={contacts ?? []} selectedId={previewAs} onSelect={setPreviewAs} onContactSaved={(c) => setContacts((cs) => cs?.map((x) => (x.id === c.id ? c : x)))} />
+
+        <BlockEditor blocks={blocks} setBlocks={setBlocks} />
+
         <Card>
-          <CardHeader title="Content" description="Build your email from blocks. Use {{first_name|there}} to personalise." />
-          <div className="space-y-4 p-6">
-            {blocks.length === 0 ? <p className="rounded-xl bg-mist-50 p-4 text-sm text-ink-muted">No blocks yet. Add one below.</p> : null}
-            {blocks.map((b, i) => (
-              <div key={b.id} className="rounded-2xl border border-mist p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="text-sm font-bold text-ink">{LABELS[b.type]}</span>
-                  <span className="flex gap-1">
-                    <button type="button" onClick={() => move(i, -1)} className="rounded-full p-1.5 hover:bg-mist-100" aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => move(i, 1)} className="rounded-full p-1.5 hover:bg-mist-100" aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => setBlocks((bs) => bs.filter((x) => x.id !== b.id))} className="rounded-full p-1.5 text-danger hover:bg-danger-soft" aria-label="Delete block"><Trash2 className="h-4 w-4" /></button>
-                  </span>
-                </div>
-                {b.type === "heading" ? <Input value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} aria-label="Heading text" /> : null}
-                {b.type === "text" ? <Textarea value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} aria-label="Text" /> : null}
-                {b.type === "image" ? (
-                  <div className="space-y-3">
-                    <Input value={b.url} onChange={(e) => patch(b.id, { url: e.target.value })} placeholder="https://…/image.jpg" aria-label="Image URL" />
-                    <Input value={b.alt} onChange={(e) => patch(b.id, { alt: e.target.value })} placeholder="Describe the image" aria-label="Alt text" />
-                    <Input value={b.link ?? ""} onChange={(e) => patch(b.id, { link: e.target.value })} placeholder="Optional link when clicked" aria-label="Image link" />
-                  </div>
-                ) : null}
-                {b.type === "button" ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Input value={b.label} onChange={(e) => patch(b.id, { label: e.target.value })} aria-label="Button label" />
-                    <Input value={b.url} onChange={(e) => patch(b.id, { url: e.target.value })} placeholder="https://" aria-label="Button link" />
-                  </div>
-                ) : null}
-                {b.type === "spacer" ? <Input type="number" min={4} max={120} value={b.height} onChange={(e) => patch(b.id, { height: Number(e.target.value) })} aria-label="Height in pixels" className="max-w-[140px]" /> : null}
-                {b.type === "divider" ? <p className="text-sm text-ink-muted">A thin horizontal line.</p> : null}
-              </div>
-            ))}
-            <div className="flex flex-wrap gap-2 pt-1">
-              {(["heading", "text", "image", "button", "divider", "spacer"] as const).map((t) => (
-                <Button key={t} type="button" variant="secondary" size="sm" onClick={() => setBlocks((bs) => [...bs, blank(t)])}>+ {LABELS[t]}</Button>
-              ))}
+          <CardHeader title="Save as template" description="Keep this layout so you can start future campaigns from it." />
+          <div className="flex flex-wrap items-end gap-3 p-6">
+            <div className="min-w-[220px] flex-1">
+              <Field label="Template name" htmlFor="tpl-name">
+                <Input id="tpl-name" value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="Defaults to the campaign name" maxLength={120} />
+              </Field>
             </div>
+            <Button type="button" variant="secondary" onClick={saveAsTemplate} disabled={savingTpl}>
+              <BookmarkPlus className="h-4 w-4" aria-hidden="true" />
+              {savingTpl ? "Saving…" : "Save as template"}
+            </Button>
           </div>
         </Card>
 
         <Card>
           <CardHeader title="Send" description="The unsubscribe link and your business address are added to the footer automatically." />
           <div className="space-y-5 p-6">
+            <p className="flex items-center gap-2 rounded-xl bg-mist-50 px-4 py-3 text-sm text-ink">
+              <Users className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
+              <span>Audience: <strong className="font-bold">{audienceName}</strong> · {people(audienceCount)}</span>
+            </p>
             <div className="flex flex-wrap gap-6 text-sm">
               <label className="flex items-center gap-2"><input type="radio" name="mode" value="now" checked={mode === "now"} onChange={() => setMode("now")} className="accent-brand-700" />Send now</label>
               <label className="flex items-center gap-2"><input type="radio" name="mode" value="later" checked={mode === "later"} onChange={() => setMode("later")} className="accent-brand-700" />Schedule</label>
@@ -269,7 +323,7 @@ export function CampaignEditor({ campaign, domains, lists: initialLists, workspa
                   e.preventDefault();
                   const ok = await confirm({
                     title: mode === "now" ? "Send this campaign now?" : "Schedule this campaign?",
-                    description: mode === "now" ? "It goes to everyone in the selected audience straight away. Emails can’t be recalled once sent." : "It will be sent to your audience at the time you chose.",
+                    description: mode === "now" ? `It goes to ${people(audienceCount)} (${audienceLabel}) straight away. Emails can’t be recalled once sent.` : `It will be sent to ${people(audienceCount)} (${audienceLabel}) at the time you chose.`,
                     confirmLabel: mode === "now" ? "Send campaign" : "Schedule campaign",
                   });
                   if (ok) form?.requestSubmit(button);
@@ -302,10 +356,7 @@ export function CampaignEditor({ campaign, domains, lists: initialLists, workspa
       </div>
 
       <div className="xl:sticky xl:top-6 xl:self-start">
-        <Card>
-          <CardHeader title="Preview" description="Shown with a sample first name." />
-          <iframe title="Email preview" srcDoc={srcDoc} sandbox="" className="h-[640px] w-full rounded-b-2xl bg-white" />
-        </Card>
+        <EmailPreviewCard doc={srcDoc} subject={previewSubject(subject, vars)} description={chosen ? `Shown as ${previewName}.` : "Shown with a sample person: Ada Lovelace."} />
       </div>
     </form>
 

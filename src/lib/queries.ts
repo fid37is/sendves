@@ -8,6 +8,8 @@ import { requireAdminDb } from "@/lib/auth/admin";
 import { dnsRecordsFor } from "@/server/sending/domains";
 import { limitsFor } from "@/config/plan-limits";
 import { getDailyActivity, getTopLinks, pct, ratio, sumDays, type RangeDays } from "@/lib/analytics";
+import { sanitizeBlocks } from "@/lib/email/sanitize";
+import type { Block } from "@/lib/email/blocks";
 import type { CampaignStatus, ContactStatus, WorkspaceStatus } from "@/types";
 
 const fmt = (iso?: string | null) =>
@@ -138,6 +140,50 @@ export async function getLists(ctx: Ctx) {
   if (!ctx.db || !ctx.workspace) return [] as { id: string; name: string; count: number }[];
   const { data } = await ctx.db.from("lists").select("id, name, list_members(count)").eq("workspace_id", ctx.workspace.id).order("name");
   return (data ?? []).map((l: any) => ({ id: l.id as string, name: l.name as string, count: Number(l.list_members?.[0]?.count ?? 0) }));
+}
+
+/**
+ * What a campaign can be sent to, with the number of people who would actually receive it
+ * (subscribed contacts only, the same rule the send itself uses).
+ */
+export type AudienceOption = { id: string; name: string; subscribed: number };
+export async function getAudienceOptions(ctx: Ctx): Promise<{ lists: AudienceOption[]; totalSubscribed: number }> {
+  if (!ctx.db || !ctx.workspace) return { lists: [], totalSubscribed: 0 };
+  const db = ctx.db;
+  const ws = ctx.workspace.id;
+  const [{ data: lists }, { count: total }] = await Promise.all([
+    db.from("lists").select("id, name").eq("workspace_id", ws).order("name"),
+    db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ws).eq("status", "subscribed"),
+  ]);
+  const withCounts = await Promise.all(
+    (lists ?? []).map(async (l: any) => {
+      const { count } = await db.from("contacts").select("id, list_members!inner(list_id)", { count: "exact", head: true })
+        .eq("workspace_id", ws).eq("status", "subscribed").eq("list_members.list_id", l.id);
+      return { id: l.id as string, name: l.name as string, subscribed: count ?? 0 };
+    }),
+  );
+  return { lists: withCounts, totalSubscribed: total ?? 0 };
+}
+
+export type TemplateRow = { id: string; name: string; description: string; subject: string; preview_text: string; blocks: Block[]; updated: string };
+const toTemplate = (t: any): TemplateRow => ({
+  id: t.id, name: t.name, description: t.description ?? "", subject: t.subject ?? "", preview_text: t.preview_text ?? "",
+  blocks: sanitizeBlocks(t.blocks), updated: fmt(t.updated_at),
+});
+
+/** The workspace's own templates, most recently edited first. */
+export async function getTemplates(ctx: Ctx): Promise<TemplateRow[]> {
+  if (!ctx.db || !ctx.workspace) return [];
+  const { data } = await ctx.db.from("templates").select("id, name, description, subject, preview_text, blocks, updated_at")
+    .eq("workspace_id", ctx.workspace.id).order("updated_at", { ascending: false }).limit(200);
+  return (data ?? []).map(toTemplate);
+}
+
+export async function getTemplate(ctx: Ctx, id: string): Promise<TemplateRow | null> {
+  if (!ctx.db || !ctx.workspace || !UUID_RE.test(id)) return null;
+  const { data } = await ctx.db.from("templates").select("id, name, description, subject, preview_text, blocks, updated_at")
+    .eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
+  return data ? toTemplate(data) : null;
 }
 
 /** Lists with member counts, plus the total number of contacts (for the "All contacts" row). */

@@ -13,6 +13,18 @@ export type Block =
   | { id: string; type: "spacer"; height: number }
   | { id: string; type: "html"; html: string };
 
+/** Copies blocks with fresh ids, so a template and the campaign made from it never share ids. */
+export function cloneBlocks(blocks: Block[]): Block[] {
+  return blocks.map((b) => ({ ...b, id: Math.random().toString(36).slice(2, 10) }) as Block);
+}
+
+/** The variables an email can use. `token` is what gets inserted; `fallback` marks ones that accept {{name|fallback}}. */
+export const EMAIL_VARIABLES = [
+  { key: "first_name", label: "First name", fallback: true },
+  { key: "last_name", label: "Last name", fallback: true },
+  { key: "email", label: "Email address", fallback: false },
+] as const;
+
 /** Email clients ignore CSS variables, so email markup uses plain hex from the single brand file. */
 export const ACCENT = emailTheme.action;
 

@@ -365,3 +365,17 @@ export async function deleteContactsAction(input: { contactIds: string[] }): Pro
   revalidatePath("/app/contacts");
   return { ok: true, message: `${plural(owned.length, "contact", "contacts")} deleted.` };
 }
+
+/** Sets the names used by {{first_name}} and {{last_name}} for one contact. */
+export async function updateContactNameAction(input: { contactId: string; firstName: string; lastName: string }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const id = String(input?.contactId ?? "");
+  if (!UUID_RE.test(id)) return { ok: false, error: "Contact not found." };
+  const first = cleanName(input?.firstName);
+  const last = cleanName(input?.lastName);
+  const { data, error } = await ctx.db.from("contacts").update({ first_name: first || null, last_name: last || null })
+    .eq("id", id).eq("workspace_id", ctx.workspace.id).select("id").maybeSingle();
+  if (error || !data) return { ok: false, error: "Couldn’t save that contact. Try again." };
+  revalidatePath("/app/contacts");
+  return { ok: true, message: "Contact updated." };
+}

@@ -2,14 +2,15 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { starterTemplates } from "@/config/starter-templates";
 import { limitsFor } from "@/config/plan-limits";
 import { renderBlocks } from "@/lib/email/blocks";
 import { sanitizeBlocks } from "@/lib/email/sanitize";
+import { getAudienceOptions } from "@/lib/queries";
 import { go } from "@/lib/flash";
 import { requireWorkspace } from "@/lib/workspace";
 import { getProvider } from "@/server/sending/providers";
 import { buildEmail } from "@/server/sending/render";
+import { createDraftFromTemplate, resolveTemplate } from "@/server/templates";
 
 type Ctx = Awaited<ReturnType<typeof requireWorkspace>>;
 const page = (id: string) => `/app/campaigns/${id}`;
@@ -19,15 +20,10 @@ export async function createCampaignAction(formData: FormData) {
   const ctx = await requireWorkspace("/app/campaigns/new");
   const name = text(formData, "name", 120);
   if (!name) go("/app/campaigns/new", "err", "Give the campaign a name.");
-  const template = starterTemplates.find((t) => t.id === text(formData, "template")) ?? starterTemplates[0];
-  const blocks = template.blocks;
-
-  const { data, error } = await ctx.db.from("campaigns").insert({
-    workspace_id: ctx.workspace.id, name, blocks, html: renderBlocks(blocks), created_by: ctx.user.id,
-    from_name: ctx.workspace.name,
-  }).select("id").single();
-  if (error || !data) go("/app/campaigns/new", "err", "Couldn’t create the campaign. Try again.");
-  redirect(page(data.id));
+  const tpl = (await resolveTemplate(ctx.db, ctx.workspace.id, text(formData, "template", 60))) ?? (await resolveTemplate(ctx.db, ctx.workspace.id, "blank"))!;
+  const id = await createDraftFromTemplate(ctx, tpl, name);
+  if (!id) go("/app/campaigns/new", "err", "Couldn’t create the campaign. Try again.");
+  redirect(page(id));
 }
 
 /** Reads and validates the editor form into the row stored on a draft. Never redirects. */
@@ -225,4 +221,25 @@ export async function deleteCampaignAction(formData: FormData) {
   if (c.status === "draft" || c.status === "cancelled") await ctx.db.from("campaigns").delete().eq("id", c.id);
   revalidatePath("/app/campaigns");
   go("/app/campaigns", "ok", "Campaign deleted.");
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export type PreviewContact = { id: string; email: string; first_name: string | null; last_name: string | null };
+
+/** Up to 25 subscribed people in the chosen audience, for the editor's "Preview as" picker. */
+export async function previewContactsAction(listId: string): Promise<PreviewContact[]> {
+  const ctx = await requireWorkspace("/app/campaigns");
+  const id = String(listId ?? "");
+  if (id && !UUID_RE.test(id)) return [];
+  const base = id
+    ? ctx.db.from("contacts").select("id, email, first_name, last_name, list_members!inner(list_id)").eq("list_members.list_id", id)
+    : ctx.db.from("contacts").select("id, email, first_name, last_name");
+  const { data } = await base.eq("workspace_id", ctx.workspace.id).eq("status", "subscribed").order("created_at", { ascending: false }).limit(25);
+  return (data ?? []).map((c: any) => ({ id: c.id, email: c.email, first_name: c.first_name ?? null, last_name: c.last_name ?? null }));
+}
+
+/** Fresh audience sizes for the editor, after people are added to a list. */
+export async function audienceOptionsAction() {
+  const ctx = await requireWorkspace("/app/campaigns");
+  return getAudienceOptions(ctx);
 }

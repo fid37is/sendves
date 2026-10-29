@@ -10,14 +10,15 @@ import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
 import { Funnel, TrendChart } from "@/components/charts/trend-chart";
 import { CampaignEditor } from "@/components/dashboard/campaign-editor";
 import { pct } from "@/lib/analytics";
-import { getCampaignDetail, getDomains, getLists } from "@/lib/queries";
+import { getAudienceOptions, getCampaignDetail, getDomains } from "@/lib/queries";
 import { getContext } from "@/lib/workspace";
 import { formatNumber } from "@/lib/utils";
 import type { SearchParams } from "@/types";
 import {
   cancelCampaignAction, deleteCampaignAction, pauseCampaignAction, resumeCampaignAction,
-  autosaveCampaignAction, sendTestAction, submitCampaignAction,
+  audienceOptionsAction, autosaveCampaignAction, previewContactsAction, sendTestAction, submitCampaignAction,
 } from "../actions";
+import { saveCampaignAsTemplateAction } from "../../templates/actions";
 
 export const metadata: Metadata = { title: "Campaign" };
 
@@ -28,7 +29,7 @@ export default async function CampaignPage({ params }: { params: { id: string };
   const { campaign: c, stats, links, series } = detail;
 
   if (c.status === "draft") {
-    const [domains, lists] = await Promise.all([getDomains(ctx), getLists(ctx)]);
+    const [domains, audience] = await Promise.all([getDomains(ctx), getAudienceOptions(ctx)]);
     const toasts: { id: string; kind: ToastKind; message: string }[] = [];
     if (domains.length === 0) toasts.push({ id: "no-domain", kind: "warning", message: "You haven’t added a sending domain yet. Add and verify one under Sending domains before you send." });
     return (
@@ -38,9 +39,13 @@ export default async function CampaignPage({ params }: { params: { id: string };
         <CampaignEditor
           campaign={{ id: c.id, name: c.name, subject: c.subject, preview_text: c.preview_text, from_name: c.from_name, from_email: c.from_email, list_id: c.list_id, blocks: c.blocks ?? [] }}
           domains={domains.map((d) => ({ id: d.id, domain: d.domain, status: d.status }))}
-          lists={lists.map((l) => ({ id: l.id, name: l.name }))}
+          lists={audience.lists}
+          totalSubscribed={audience.totalSubscribed}
           workspace={{ name: ctx.workspace.name, business_address: ctx.workspace.business_address }}
-          actions={{ autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, remove: deleteCampaignAction }}
+          actions={{
+            autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, remove: deleteCampaignAction,
+            saveTemplate: saveCampaignAsTemplateAction, previewContacts: previewContactsAction, audienceOptions: audienceOptionsAction,
+          }}
         />
       </>
     );
