@@ -176,22 +176,21 @@ export function LaunchPad() {
         <svg key={run} viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
           {/* Guide lines from the campaign to every inbox */}
           {paths.map((d, i) => (
-            <path key={i} d={d} fill="none" stroke="#fff" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="3 7" strokeLinecap="round" />
+            <path key={i} d={d} fill="none" className="stroke-white" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="3 7" strokeLinecap="round" />
           ))}
 
           {started && !reduced ? (
             <>
               {[0, 0.22].map((delay) => (
-                <circle key={delay} className="burst" cx={ORIGIN.x} cy={ORIGIN.y} r="12" fill="none" stroke="#fff" strokeWidth="2" style={{ animationDelay: `${delay}s` }} />
+                <circle key={delay} className="burst stroke-white" cx={ORIGIN.x} cy={ORIGIN.y} r="12" fill="none" strokeWidth="2" style={{ animationDelay: `${delay}s` }} />
               ))}
               {flights.map((f) => (
                 <path
                   key={`t${f.k}`}
-                  className="trail"
+                  className="trail stroke-white"
                   d={paths[f.inbox]}
                   pathLength={1}
                   fill="none"
-                  stroke="#fff"
                   strokeWidth="2.5"
                   strokeLinecap="round"
                   style={{ animationDelay: `${f.begin}s` }}
@@ -211,8 +210,8 @@ export function LaunchPad() {
                     keySplines="0.35 0 0.25 1"
                   />
                   <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.86;1" dur={`${FLIGHT}s`} begin={`${f.begin}s`} fill="freeze" />
-                  <rect x="-11" y="-8" width="22" height="16" rx="3.5" fill="#fff" />
-                  <path d="M-11,-6.5 L0,1.5 L11,-6.5" fill="none" stroke="#FF0000" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+                  <rect x="-11" y="-8" width="22" height="16" rx="3.5" className="fill-white" />
+                  <path d="M-11,-6.5 L0,1.5 L11,-6.5" fill="none" className="stroke-brand-700" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
                 </g>
               ))}
             </>
@@ -221,15 +220,15 @@ export function LaunchPad() {
           {/* Inboxes */}
           {INBOXES.map((y, i) => (
             <g key={i}>
-              <rect x={INBOX_X} y={y - INBOX_H / 2} width={INBOX_W} height={INBOX_H} rx="10" fill="#fff" fillOpacity="0.12" stroke="#fff" strokeOpacity="0.35" />
-              <g fill="none" stroke="#fff" strokeOpacity="0.8" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round">
+              <rect x={INBOX_X} y={y - INBOX_H / 2} width={INBOX_W} height={INBOX_H} rx="10" className="fill-white stroke-white" fillOpacity="0.12" strokeOpacity="0.35" />
+              <g fill="none" className="stroke-white" strokeOpacity="0.8" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round">
                 <rect x={INBOX_X + 11} y={y - 7} width="22" height="14" rx="3" />
                 <path d={`M${INBOX_X + 11},${y - 5} l11,8 l11,-8`} />
               </g>
               {started ? (
                 <g className="inbox-ok" style={{ animationDelay: reduced ? "0s" : `${firstArrival[i]}s` }}>
-                  <rect x={INBOX_X} y={y - INBOX_H / 2} width={INBOX_W} height={INBOX_H} rx="10" fill="#22C55E" />
-                  <path d={`M${INBOX_X + 14},${y} l6,6 l12,-12`} fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+                  <rect x={INBOX_X} y={y - INBOX_H / 2} width={INBOX_W} height={INBOX_H} rx="10" className="fill-success" />
+                  <path d={`M${INBOX_X + 14},${y} l6,6 l12,-12`} fill="none" className="stroke-white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
                 </g>
               ) : null}
             </g>
@@ -289,13 +288,13 @@ export function LaunchPad() {
             ].map(([label, value]) => (
               <div key={label}>
                 <dd className="font-display text-lg font-extrabold leading-none sm:text-2xl">{value}</dd>
-                <dt className="mt-1 truncate text-[10px] text-white sm:text-xs">{label}</dt>
+                <dt className="mt-1 truncate text-[10px] text-accent-100 sm:text-xs">{label}</dt>
               </div>
             ))}
           </dl>
         </div>
       </div>
-      <p className="mt-3 text-center text-xs text-white">Sample data, for illustration</p>
+      <p className="mt-3 text-center text-xs text-accent-100">Sample data, for illustration</p>
     </div>
   );
 }

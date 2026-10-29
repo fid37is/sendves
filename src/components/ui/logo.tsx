@@ -28,7 +28,7 @@ export function Logo({ href = "/", light = false, className }: { href?: string; 
       <LogoMark light={light} className="h-9 sm:h-12 lg:h-14" />
       {SHOW_WORDMARK ? (
         <span className={cn("font-display text-xl font-extrabold tracking-tight sm:text-2xl lg:text-3xl", light ? "text-white" : "text-ink")}>
-          Send<span className={light ? "text-brand-400" : "text-brand-800"}>ves</span>
+          Send<span className={light ? "text-accent-400" : "text-brand-700"}>ves</span>
         </span>
       ) : null}
     </Link>

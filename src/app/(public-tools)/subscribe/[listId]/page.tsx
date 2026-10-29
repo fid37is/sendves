@@ -19,7 +19,7 @@ export default async function SubscribePage({ params, searchParams }: { params: 
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-white px-6">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-canvas px-6">
       <FlashToast />
       <Logo href="/" />
       <div className="mt-10 w-full max-w-md rounded-3xl border border-mist p-8">

@@ -42,12 +42,17 @@ export function AppShell({
   const rawPath = usePathname();
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  // The highlight jumps to the clicked item at once, rather than waiting for the next page to arrive.
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const admin = area === "admin";
 
   // The admin console is served from its own host, so its public paths have no /admin prefix.
   const pathname = admin ? rawPath.replace(/^\/admin(?=\/|$)/, "") || "/" : rawPath;
   const root = nav[0]?.href;
-  const activeIndex = nav.findIndex((item) => (item.href === root ? pathname === root : pathname.startsWith(item.href)));
+  const target = pendingHref ?? pathname;
+  const activeIndex = nav.findIndex((item) => (item.href === root ? target === root : target.startsWith(item.href)));
+
+  useEffect(() => setPendingHref(null), [pathname]);
 
   function toggle() {
     setCollapsed((c) => {
@@ -71,7 +76,7 @@ export function AppShell({
 
   function renderSidebar(compact: boolean) {
     return (
-      <div className={cn("flex h-full flex-col", admin ? "bg-navy text-white" : "bg-white")}>
+      <div className={cn("flex h-full flex-col", admin ? "bg-night text-white" : "bg-white")}>
         <div className={cn("flex h-[72px] items-center", compact ? "justify-center px-2" : "justify-between px-5")}>
           {compact ? (
             <Link href={root} aria-label="Home" className="logo">
@@ -108,7 +113,7 @@ export function AppShell({
               )}
               style={{ transform: `translateY(${Math.max(activeIndex, 0) * ITEM_PITCH}px)` }}
             >
-              <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-brand-700" />
+              <span className={cn("absolute inset-y-2 left-0 w-1 rounded-full", admin ? "bg-accent-400" : "bg-brand-700")} />
             </span>
             {nav.map((item, i) => {
               const Icon = icons[item.icon];
@@ -117,7 +122,10 @@ export function AppShell({
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={() => setOpen(false)}
+                  onClick={() => {
+                    setOpen(false);
+                    setPendingHref(item.href);
+                  }}
                   aria-current={active ? "page" : undefined}
                   aria-label={compact ? item.label : undefined}
                   title={compact ? item.label : undefined}
@@ -141,7 +149,7 @@ export function AppShell({
           {switchLink && !compact ? (
             <a
               href={switchLink.href}
-              className={cn("mb-3 block rounded-xl px-3 py-2 text-sm font-semibold", admin ? "text-white hover:bg-white/10" : "text-brand-800 hover:bg-brand-50")}
+              className={cn("mb-3 block rounded-xl px-3 py-2 text-sm font-semibold", admin ? "text-accent-300 hover:bg-white/10" : "text-brand-800 hover:bg-brand-50")}
             >
               {switchLink.label}
             </a>
@@ -149,7 +157,7 @@ export function AppShell({
           <div className={cn("flex items-center gap-3", compact && "flex-col")}>
             <span
               title={compact ? user.fullName || user.email : undefined}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white"
+              className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold", admin ? "bg-accent-400 text-night" : "bg-brand-700 text-white")}
             >
               {initials(user.fullName || user.email)}
             </span>
@@ -180,7 +188,7 @@ export function AppShell({
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-30 hidden border-r transition-[width] duration-300 ease-out lg:block",
-          admin ? "border-navy-800" : "border-mist",
+          admin ? "border-night-800" : "border-mist",
           collapsed ? "w-[76px]" : "w-64",
         )}
       >
@@ -191,13 +199,13 @@ export function AppShell({
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-expanded={!collapsed}
           title={collapsed ? "Expand sidebar  [" : "Collapse sidebar  ["}
-          className="absolute -right-3.5 top-[88px] z-40 flex h-7 w-7 items-center justify-center rounded-full border border-lavender bg-white text-navy shadow-sm transition-colors hover:bg-lavender-100"
+          className="absolute -right-3.5 top-[88px] z-40 flex h-7 w-7 items-center justify-center rounded-full border border-accent-200 bg-white text-night shadow-sm transition-colors hover:bg-accent-100"
         >
           {collapsed ? <PanelLeftOpen className="h-4 w-4" aria-hidden="true" /> : <PanelLeftClose className="h-4 w-4" aria-hidden="true" />}
         </button>
       </aside>
 
-      <div className={cn("sticky top-0 z-20 flex h-16 items-center justify-between border-b px-4 lg:hidden", admin ? "border-navy-800 bg-navy" : "border-mist bg-white")}>
+      <div className={cn("sticky top-0 z-20 flex h-16 items-center justify-between border-b px-4 lg:hidden", admin ? "border-night-800 bg-night" : "border-mist bg-white")}>
         <Logo href={root} light={admin} />
         <button
           type="button"
@@ -212,7 +220,7 @@ export function AppShell({
 
       {open ? (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <button type="button" className="animate-fade-in absolute inset-0 bg-navy/50" onClick={() => setOpen(false)} aria-label="Close menu" />
+          <button type="button" className="animate-fade-in absolute inset-0 bg-night/50" onClick={() => setOpen(false)} aria-label="Close menu" />
           <div className="animate-slide-in-left absolute inset-y-0 left-0 w-72 max-w-[85%] shadow-xl">{renderSidebar(false)}</div>
         </div>
       ) : null}

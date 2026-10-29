@@ -1,36 +1,42 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
+import { palette } from "./src/config/brand";
+
+type Tree = string | { [key: string]: Tree };
+
+const hexToChannels = (hex: string): string => {
+  const h = hex.replace("#", "");
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)).join(" ");
+};
+
+/** { brand: { 700: "#164E63" } } -> { "--c-brand-700": "22 78 99" } */
+function cssVars(name: string, tree: Tree, out: Record<string, string> = {}): Record<string, string> {
+  if (typeof tree === "string") {
+    out[`--c-${name}`] = hexToChannels(tree);
+  } else {
+    for (const [key, value] of Object.entries(tree)) cssVars(key === "DEFAULT" ? name : `${name}-${key}`, value, out);
+  }
+  return out;
+}
+
+/** Same shape, but each leaf becomes an rgb(var(--c-…) / <alpha-value>) colour so opacity utilities work. */
+function colorTree(name: string, tree: Tree): Tree {
+  if (typeof tree === "string") return `rgb(var(--c-${name}) / <alpha-value>)`;
+  return Object.fromEntries(Object.entries(tree).map(([key, value]) => [key, colorTree(key === "DEFAULT" ? name : `${name}-${key}`, value)]));
+}
+
+const vars: Record<string, string> = {};
+const colors: Record<string, Tree> = {};
+for (const [name, tree] of Object.entries(palette)) {
+  cssVars(name, tree as Tree, vars);
+  colors[name] = colorTree(name, tree as Tree);
+}
 
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
-      colors: {
-        white: "#ffffff",
-        /* Deep navy replaces pure black everywhere. */
-        navy: { DEFAULT: "#0B1233", 950: "#070B22", 900: "#0B1233", 800: "#141C45", 700: "#222B5C" },
-        ink: { DEFAULT: "#0B1233", soft: "#3A4263", muted: "#6B7290" },
-        night: "#0B1233",
-        spark: "#FBBF24",
-        /* Pale lavender: borders, subtle surfaces and the toast accent. */
-        lavender: { DEFAULT: "#E4DCEF", 50: "#FAF8FD", 100: "#F3EFF8", 200: "#E4DCEF", 300: "#D3C7E3" },
-        /* Primary red. 700 is the primary (#ff0000); 800 is its hover state. */
-        brand: {
-          DEFAULT: "#FF0000",
-          50: "#FFF1F1",
-          100: "#FFE0E0",
-          200: "#FFC2C2",
-          400: "#FF6B6B",
-          500: "#FF3D3D",
-          600: "#FF1A1A",
-          700: "#FF0000",
-          800: "#D90000",
-          900: "#A30000",
-        },
-        mist: { DEFAULT: "#E4DCEF", 50: "#FAF8FD", 100: "#F3EFF8" },
-        success: "#15803D",
-        warning: "#A16207",
-        danger: "#D90000",
-      },
+      colors: { white: "#ffffff", ...colors } as Record<string, any>,
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         display: ["var(--font-display)", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
@@ -52,7 +58,12 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Publishes the palette as CSS variables on :root. A future dark theme only needs another block here.
+    plugin(({ addBase }) => {
+      addBase({ ":root": vars });
+    }),
+  ],
 };
 
 export default config;

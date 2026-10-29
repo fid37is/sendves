@@ -4,7 +4,7 @@ import { SpeedLines } from "@/components/motion/speed-lines";
 
 export default function NotFound() {
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-white px-6 text-center">
+    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-canvas px-6 text-center">
       <SpeedLines tone="light" />
       <div className="relative">
         <div className="mx-auto mb-8 flex h-24 w-24 animate-bob items-center justify-center rounded-3xl bg-brand-700 shadow-xl shadow-brand-700/30" aria-hidden="true">

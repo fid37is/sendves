@@ -15,7 +15,7 @@ export function DeliverabilityChecks({ items }: { items: string[] }) {
         return (
           <li
             key={text}
-            className="flex items-start gap-4 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-white"
+            className="flex items-start gap-4 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-accent-100"
             style={{
               opacity: on ? 1 : 0,
               transform: on ? "none" : "translateX(18px)",
@@ -23,14 +23,11 @@ export function DeliverabilityChecks({ items }: { items: string[] }) {
             }}
           >
             <span
-              className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-              style={{
-                backgroundColor: on ? "#22C55E" : "rgba(255,255,255,.12)",
-                transition: play ? `background-color .3s ${delay + 0.2}s` : "none",
-              }}
+              className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${on ? "bg-success" : "bg-white/[0.12]"}`}
+              style={{ transition: play ? `background-color .3s ${delay + 0.2}s` : "none" }}
               aria-hidden="true"
             >
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 stroke-white" fill="none" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
                 <path
                   d="M5 12.5l4.5 4.5L19 7.5"
                   pathLength={1}

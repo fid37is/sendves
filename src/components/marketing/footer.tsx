@@ -22,7 +22,7 @@ function Column({ title, links }: { title: string; links: { label: string; href:
 
 export function SiteFooter() {
   return (
-    <footer className="border-t border-mist bg-white">
+    <footer className="border-t border-mist bg-canvas">
       <div className="mx-auto max-w-page px-5 py-14 sm:px-8">
         <div className="grid gap-10 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>

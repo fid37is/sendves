@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { personalize, renderBlocks, type Block } from "@/lib/email/blocks";
+import { emailTheme } from "@/config/brand";
 
 type Action = (formData: FormData) => Promise<void>;
 type Props = {
@@ -42,7 +43,7 @@ export function CampaignEditor({ campaign, domains, lists, workspace, actions }:
     setBlocks((bs) => { const n = [...bs]; const j = i + d; if (j < 0 || j >= n.length) return bs; [n[i], n[j]] = [n[j], n[i]]; return n; });
 
   const srcDoc = useMemo(() => {
-    const footer = `<p style="margin:16px 0 0;font-size:12px;color:#6B7290;text-align:center;">You are receiving this email because you subscribed to ${workspace.name.replace(/</g, "")}.<br><u>Unsubscribe</u><br>${(workspace.business_address ?? "Your business address").replace(/</g, "")}</p>`;
+    const footer = `<p style="margin:16px 0 0;font-size:12px;color:${emailTheme.muted};text-align:center;">You are receiving this email because you subscribed to ${workspace.name.replace(/</g, "")}.<br><u>Unsubscribe</u><br>${(workspace.business_address ?? "Your business address").replace(/</g, "")}</p>`;
     return personalize(renderBlocks(blocks, { preview: previewText }), { first_name: "Ada" }).replace("<!--FOOTER-->", footer);
   }, [blocks, previewText, workspace]);
 
@@ -93,7 +94,7 @@ export function CampaignEditor({ campaign, domains, lists, workspace, actions }:
                   <span className="flex gap-1">
                     <button type="button" onClick={() => move(i, -1)} className="rounded-full p-1.5 hover:bg-mist-100" aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
                     <button type="button" onClick={() => move(i, 1)} className="rounded-full p-1.5 hover:bg-mist-100" aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => setBlocks((bs) => bs.filter((x) => x.id !== b.id))} className="rounded-full p-1.5 text-danger hover:bg-red-50" aria-label="Delete block"><Trash2 className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => setBlocks((bs) => bs.filter((x) => x.id !== b.id))} className="rounded-full p-1.5 text-danger hover:bg-danger-soft" aria-label="Delete block"><Trash2 className="h-4 w-4" /></button>
                   </span>
                 </div>
                 {b.type === "heading" ? <Input value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} aria-label="Heading text" /> : null}

@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 export function EnvelopeIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
     <svg viewBox="0 0 40 28" className={className} style={style} fill="none" aria-hidden="true">
-      <rect x="1" y="1" width="38" height="26" rx="5" fill="#fff" />
-      <path d="M4 6l16 11L36 6" stroke="#1D4ED8" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="1" y="1" width="38" height="26" rx="5" className="fill-white" />
+      <path d="M4 6l16 11L36 6" className="stroke-brand-700" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Toasts are the only way the app reports errors, successes, warnings and information.
- * White card, pale-lavender (#e4dcef) accent; red text = error, green = success,
- * yellow = warning, deep navy = information.
+ * White card with a Sea Glass accent (border, icon chip, countdown bar). Text colour carries the
+ * meaning: danger = error, success = success, warning = warning, ink = information.
  */
 export type ToastKind = "error" | "success" | "warning" | "info";
 type Item = { id: number; kind: ToastKind; message: string; duration: number };
@@ -52,7 +52,7 @@ const styles: Record<ToastKind, { text: string; label: string; Icon: typeof Info
   error: { text: "text-danger", label: "Error", Icon: CircleAlert },
   success: { text: "text-success", label: "Success", Icon: CircleCheck },
   warning: { text: "text-warning", label: "Warning", Icon: TriangleAlert },
-  info: { text: "text-navy", label: "Info", Icon: Info },
+  info: { text: "text-ink", label: "Info", Icon: Info },
 };
 
 function ToastCard({ item }: { item: Item }) {
@@ -60,10 +60,10 @@ function ToastCard({ item }: { item: Item }) {
   return (
     <div
       role={item.kind === "error" ? "alert" : "status"}
-      className="animate-toast-in group pointer-events-auto relative overflow-hidden rounded-2xl border border-lavender bg-white shadow-[0_14px_36px_-14px_rgba(11,18,51,0.35)]"
+      className="animate-toast-in group pointer-events-auto relative overflow-hidden rounded-2xl border border-accent-200 bg-white shadow-xl shadow-night/15"
     >
       <div className="flex items-start gap-3 p-4 pr-10">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-lavender-100 ring-1 ring-lavender">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-100 ring-1 ring-accent-200">
           <Icon className={cn("h-[18px] w-[18px]", text)} aria-hidden="true" />
         </span>
         <div className={cn("min-w-0 text-sm", text)}>
@@ -75,7 +75,7 @@ function ToastCard({ item }: { item: Item }) {
         type="button"
         onClick={() => dismiss(item.id)}
         aria-label="Dismiss notification"
-        className="absolute right-2 top-2 rounded-full p-1.5 text-ink-muted transition-colors hover:bg-lavender-100 hover:text-navy"
+        className="absolute right-2 top-2 rounded-full p-1.5 text-ink-muted transition-colors hover:bg-accent-100 hover:text-ink"
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>
@@ -83,7 +83,7 @@ function ToastCard({ item }: { item: Item }) {
       <span
         aria-hidden="true"
         onAnimationEnd={() => dismiss(item.id)}
-        className="absolute inset-x-0 bottom-0 h-1 origin-left bg-lavender [animation-fill-mode:forwards] [animation-name:toast-bar] [animation-timing-function:linear] group-focus-within:[animation-play-state:paused] group-hover:[animation-play-state:paused]"
+        className="absolute inset-x-0 bottom-0 h-1 origin-left bg-accent-200 [animation-fill-mode:forwards] [animation-name:toast-bar] [animation-timing-function:linear] group-focus-within:[animation-play-state:paused] group-hover:[animation-play-state:paused]"
         style={{ animationDuration: `${item.duration}ms` }}
       />
     </div>

@@ -45,8 +45,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
               ariaLabel={`Clicks and unique clickers per day over the last ${days} days`}
               dates={series.map((d) => d.date)}
               series={[
-                { key: "clicks", label: "Clicks", color: "#FF0000", values: series.map((d) => d.clicks), area: true },
-                { key: "unique", label: "Unique clickers", color: "#0B1233", values: series.map((d) => d.uniqueClicks), dashed: true },
+                { key: "clicks", label: "Clicks", tone: "brand", values: series.map((d) => d.clicks), area: true },
+                { key: "unique", label: "Unique clickers", tone: "accent", values: series.map((d) => d.uniqueClicks), dashed: true },
               ]}
             />
           </div>
@@ -72,8 +72,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
               ariaLabel={`Emails sent and delivered per day over the last ${days} days`}
               dates={series.map((d) => d.date)}
               series={[
-                { key: "sent", label: "Sent", color: "#0B1233", values: series.map((d) => d.sent), area: true },
-                { key: "delivered", label: "Delivered", color: "#8B6FB8", values: series.map((d) => d.delivered) },
+                { key: "sent", label: "Sent", tone: "ink", values: series.map((d) => d.sent), area: true },
+                { key: "delivered", label: "Delivered", tone: "accent", values: series.map((d) => d.delivered) },
               ]}
             />
           </div>
@@ -91,7 +91,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         <Card>
           <CardHeader title="Best by click rate" description="Sent campaigns, all time" />
           <BarList
-            barClass="bg-navy"
             format={(v) => `${v.toFixed(1)}%`}
             empty="Your best campaigns appear here after your first send."
             items={ranked.map((c) => ({ label: c.name, value: c.clickRateValue ?? 0, href: `/app/campaigns/${c.id}`, sub: `${formatNumber(c.sent)} sent · ${formatNumber(c.clicks)} clicked` }))}

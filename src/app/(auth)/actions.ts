@@ -26,7 +26,6 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
   if (!EMAIL_RE.test(email)) return { error: "Enter a valid email address." };
   if (password.length < 8) return { error: "Use a password with at least 8 characters." };
   if (password !== confirm) return { error: "The passwords don’t match." };
-  if (formData.get("terms") !== "on") return { error: "Accept the terms of service to continue." };
   if (!isSupabaseConfigured) return { error: NOT_CONFIGURED };
 
   const supabase = createClient();
@@ -34,7 +33,8 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
     email,
     password,
     options: {
-      data: { full_name: fullName },
+      // Creating the account is the acceptance. The timestamp is kept as proof of when.
+      data: { full_name: fullName, terms_accepted_at: new Date().toISOString() },
       emailRedirectTo: `${env.siteUrl}/auth/callback?next=/app`,
     },
   });

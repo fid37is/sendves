@@ -16,13 +16,13 @@ const delay = (s: number): React.CSSProperties => ({ animationDelay: `${s}s` });
 
 export function Hero() {
   return (
-    <div className="bg-mist-50">
+    <div className="bg-canvas">
       <section className="slant-bottom relative overflow-hidden bg-brand-700 pb-28 pt-12 text-white sm:pb-36 sm:pt-20">
         <SpeedLines />
         <div className="relative mx-auto grid max-w-page items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1fr_1.05fr]">
           <div>
             <h1 className="animate-rise text-4xl font-extrabold leading-[1.08] sm:text-6xl" style={delay(0.05)}>Email campaigns that reach the inbox</h1>
-            <p className="animate-rise mt-6 max-w-xl text-lg text-white" style={delay(0.4)}>
+            <p className="animate-rise mt-6 max-w-xl text-lg text-accent-100" style={delay(0.4)}>
               Sendves is built for sending campaigns and nothing else. Verify your domain, import your contacts and send, with unsubscribe, bounce and complaint handling already in place.
             </p>
             <p className="animate-rise mt-8 text-sm font-bold text-white" style={delay(0.5)}>Including:</p>
@@ -32,9 +32,9 @@ export function Hero() {
                 "Guided SPF, DKIM and DMARC setup",
                 "One-click unsubscribe on every campaign",
               ].map((t, i) => (
-                <li key={t} className="animate-rise flex items-start gap-3 text-white" style={delay(0.55 + i * 0.1)}>
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/15">
-                    <Check className="h-3.5 w-3.5 text-white" aria-hidden="true" />
+                <li key={t} className="animate-rise flex items-start gap-3 text-accent-100" style={delay(0.55 + i * 0.1)}>
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-400">
+                    <Check className="h-3.5 w-3.5 text-brand-900" aria-hidden="true" />
                   </span>
                   {t}
                 </li>
@@ -44,9 +44,9 @@ export function Hero() {
               <ButtonLink href="/register" variant="light" size="lg" className="w-full sm:w-auto">Start with free plan</ButtonLink>
               <ButtonLink href="/pricing" variant="outlineLight" size="lg" className="w-full sm:w-auto">See pricing</ButtonLink>
             </div>
-            <p className="animate-rise mt-4 text-sm text-white" style={delay(1)}>No credit card required. Upgrade whenever your list grows.</p>
+            <p className="animate-rise mt-4 text-sm text-accent-100" style={delay(1)}>No credit card required. Upgrade whenever your list grows.</p>
             {env.sampleData ? (
-              <p className="animate-rise mt-6 flex items-center gap-2 text-sm text-white" style={delay(1.1)}>
+              <p className="animate-rise mt-6 flex items-center gap-2 text-sm text-accent-100" style={delay(1.1)}>
                 <span className="flex text-spark" aria-hidden="true">
                   {[0, 1, 2, 3, 4].map((i) => <Star key={i} className="h-4 w-4 fill-current" />)}
                 </span>
@@ -150,7 +150,7 @@ export function Deliverability() {
       <div className="grid items-center gap-12 lg:grid-cols-2">
         <div>
           <h2 className="text-3xl font-extrabold text-white sm:text-5xl">Deliverability is the product</h2>
-          <p className="mt-5 text-lg text-white">
+          <p className="mt-5 text-lg text-accent-100">
             A great editor means little if your emails land in spam. Sendves protects your sender reputation by default, so good senders stay trusted and bad ones are stopped early.
           </p>
           <ButtonLink href="/features#deliverability" variant="light" className="mt-8">How we protect delivery</ButtonLink>
@@ -179,7 +179,7 @@ export function CtaBand() {
       <FlyingEnvelopes />
       <div className="relative mx-auto max-w-2xl text-center">
         <h2 className="text-3xl font-extrabold text-white sm:text-5xl">Send your first campaign today</h2>
-        <p className="mt-4 text-lg text-white">Create a free account, verify your domain and reach your audience. Email that moves with you.</p>
+        <p className="mt-4 text-lg text-accent-100">Create a free account, verify your domain and reach your audience. Email that moves with you.</p>
         <div className="mt-8 flex flex-wrap justify-center gap-4">
           <ButtonLink href="/register" variant="light" size="lg">Start with free plan</ButtonLink>
           <ButtonLink href="/contact" variant="outlineLight" size="lg">Talk to us</ButtonLink>

@@ -6,6 +6,7 @@ import { adminSignInAction, startEnrollAction, verifyMfaAction, type EnrollState
 import { initialFormState } from "@/lib/auth/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { toast, useActionToast } from "@/components/ui/toast";
 
@@ -15,7 +16,7 @@ export function AdminLoginForm() {
   return (
     <form action={action} className="space-y-5">
       <Field label="Email address" htmlFor="email"><Input id="email" name="email" type="email" autoComplete="username" required /></Field>
-      <Field label="Password" htmlFor="password"><Input id="password" name="password" type="password" autoComplete="current-password" required /></Field>
+      <Field label="Password" htmlFor="password"><PasswordInput id="password" name="password" autoComplete="current-password" required /></Field>
       <SubmitButton pendingText="Signing in…">Sign in</SubmitButton>
     </form>
   );
@@ -59,7 +60,7 @@ export function MfaEnroll() {
   return (
     <div className="space-y-5">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={setup.qr} alt="QR code to add this account to your authenticator app" className="mx-auto h-44 w-44 rounded-xl border border-lavender p-2" />
+      <img src={setup.qr} alt="QR code to add this account to your authenticator app" className="mx-auto h-44 w-44 rounded-xl border border-accent-200 p-2" />
       <p className="text-center text-xs text-ink-muted">Can’t scan? Enter this key manually:<br /><span className="select-all break-all font-mono text-ink">{setup.secret}</span></p>
       <CodeForm factorId={setup.factorId} />
     </div>

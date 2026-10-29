@@ -39,9 +39,9 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
             ariaLabel={`Platform activity per day over the last ${days} days`}
             dates={series.map((d) => d.date)}
             series={[
-              { key: "sent", label: "Sent", color: "#0B1233", values: series.map((d) => d.sent), area: true },
-              { key: "clicks", label: "Clicks", color: "#FF0000", values: series.map((d) => d.clicks) },
-              { key: "unsubs", label: "Unsubscribes", color: "#8B6FB8", values: series.map((d) => d.unsubscribes), dashed: true },
+              { key: "sent", label: "Sent", tone: "ink", values: series.map((d) => d.sent), area: true },
+              { key: "clicks", label: "Clicks", tone: "brand", values: series.map((d) => d.clicks) },
+              { key: "unsubs", label: "Unsubscribes", tone: "accent", values: series.map((d) => d.unsubscribes), dashed: true },
             ]}
           />
         </div>

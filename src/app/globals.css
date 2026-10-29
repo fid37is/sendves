@@ -2,19 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --white: #ffffff;
-  --ink: #0b1233;
-}
-
 @layer base {
+  /* Edge/IE draw their own reveal button on password fields; ours replaces it. */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
   html {
     scroll-behavior: smooth;
     -webkit-text-size-adjust: 100%;
   }
   body {
-    background-color: var(--white);
-    color: var(--ink);
+    background-color: rgb(var(--c-canvas));
+    color: rgb(var(--c-ink));
     font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased;
   }
@@ -23,7 +23,7 @@
     letter-spacing: -0.02em;
   }
   :focus-visible {
-    outline: 2px solid #0b1233;
+    outline: 2px solid rgb(var(--c-brand-700));
     outline-offset: 2px;
   }
   summary::-webkit-details-marker {
@@ -85,11 +85,11 @@
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.3s;
-    background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), rgba(255, 0, 0, 0.10), transparent 70%);
+    background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), rgb(var(--c-accent-400) / 0.22), transparent 70%);
   }
   .spot:hover {
-    border-color: #ffc2c2;
-    box-shadow: 0 18px 40px -24px rgba(255, 0, 0, 0.30);
+    border-color: rgb(var(--c-accent-300));
+    box-shadow: 0 18px 40px -24px rgb(var(--c-brand-700) / 0.35);
   }
   .spot:hover::before {
     opacity: 1;
@@ -102,8 +102,8 @@
   }
   .spot:hover .spot-icon {
     transform: translateY(-3px) rotate(-8deg) scale(1.08);
-    background-color: #ff0000;
-    color: #fff;
+    background-color: rgb(var(--c-brand-700));
+    color: rgb(255 255 255);
   }
 
   /* FAQ answers ease open. */

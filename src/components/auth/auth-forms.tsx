@@ -5,6 +5,7 @@ import { useFormState } from "react-dom";
 import { forgotPasswordAction, resetPasswordAction, signInAction, signUpAction } from "@/app/(auth)/actions";
 import { initialFormState } from "@/lib/auth/types";
 import { Field, Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { PageToasts, useActionToast } from "@/components/ui/toast";
 
@@ -21,7 +22,7 @@ export function LoginForm({ next, notice }: { next?: string; notice?: string }) 
           <label htmlFor="password" className="text-sm font-semibold text-ink">Password</label>
           <Link href="/forgot-password" className="text-sm font-semibold text-brand-800 hover:underline">Forgot password?</Link>
         </div>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required />
+        <PasswordInput id="password" name="password" autoComplete="current-password" required />
       </div>
       <SubmitButton pendingText="Logging in…">Log in</SubmitButton>
     </form>
@@ -38,23 +39,22 @@ export function RegisterForm() {
         <Input id="email" name="email" type="email" autoComplete="email" required />
       </Field>
       <Field label="Password" htmlFor="password" hint="At least 8 characters.">
-        <Input id="password" name="password" type="password" autoComplete="new-password" minLength={8} required />
+        <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required />
       </Field>
       <Field label="Confirm password" htmlFor="confirmPassword">
-        <Input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" minLength={8} required />
+        <PasswordInput id="confirmPassword" name="confirmPassword" autoComplete="new-password" minLength={8} required />
       </Field>
       <div className="hidden" aria-hidden="true">
         <label htmlFor="company">Company</label>
         <input id="company" name="company" tabIndex={-1} autoComplete="off" />
       </div>
-      <label className="flex items-start gap-3 text-sm text-ink-soft">
-        <input type="checkbox" name="terms" className="mt-0.5 h-4 w-4 rounded border-mist accent-brand-700" required />
-        <span>
-          I agree to the <Link href="/terms-of-service" className="font-semibold text-brand-800 hover:underline">Terms of service</Link> and the{" "}
-          <Link href="/anti-spam-policy" className="font-semibold text-brand-800 hover:underline">Anti-spam policy</Link>.
-        </span>
-      </label>
       <SubmitButton pendingText="Creating account…">Create free account</SubmitButton>
+      <p className="text-center text-xs leading-relaxed text-ink-muted">
+        By creating an account, you agree to our{" "}
+        <Link href="/terms-of-service" className="font-semibold text-brand-800 hover:underline">Terms of Service</Link>,{" "}
+        <Link href="/privacy-policy" className="font-semibold text-brand-800 hover:underline">Privacy Policy</Link> and{" "}
+        <Link href="/anti-spam-policy" className="font-semibold text-brand-800 hover:underline">Anti-spam Policy</Link>.
+      </p>
     </form>
   );
 }
@@ -76,10 +76,10 @@ export function ResetPasswordForm() {
   return (
     <form action={action} className="space-y-5">
       <Field label="New password" htmlFor="password" hint="At least 8 characters.">
-        <Input id="password" name="password" type="password" autoComplete="new-password" minLength={8} required />
+        <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required />
       </Field>
       <Field label="Confirm new password" htmlFor="confirmPassword">
-        <Input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" minLength={8} required />
+        <PasswordInput id="confirmPassword" name="confirmPassword" autoComplete="new-password" minLength={8} required />
       </Field>
       <SubmitButton pendingText="Saving…">Save new password</SubmitButton>
     </form>

@@ -104,7 +104,9 @@ export async function middleware(request: NextRequest) {
   const hasSessionCookie = request.cookies.getAll().some((c) => c.name.startsWith("sb-"));
   if (STATELESS_API.test(pathname) || (!isProtected && !isAuthPage && !hasSessionCookie)) return NextResponse.next();
 
-  const { response, user } = await updateSession(request);
+  // Sign-in pages verify with the Auth server (so a stale cookie can never cause a redirect loop);
+  // /app only needs a quick local check here, because its layout verifies the user again.
+  const { response, user } = await updateSession(request, undefined, { verify: isAuthPage });
 
   if (isProtected && !user) {
     const url = request.nextUrl.clone();

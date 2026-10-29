@@ -60,8 +60,8 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
               ariaLabel={`Emails sent and delivered per day over the last ${days} days`}
               dates={o.series.map((d) => d.date)}
               series={[
-                { key: "sent", label: "Sent", color: "#0B1233", values: o.series.map((d) => d.sent), area: true },
-                { key: "delivered", label: "Delivered", color: "#8B6FB8", values: o.series.map((d) => d.delivered) },
+                { key: "sent", label: "Sent", tone: "ink", values: o.series.map((d) => d.sent), area: true },
+                { key: "delivered", label: "Delivered", tone: "accent", values: o.series.map((d) => d.delivered) },
               ]}
             />
           </div>
@@ -73,9 +73,9 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
               ariaLabel={`Clicks, bounces and complaints per day over the last ${days} days`}
               dates={o.series.map((d) => d.date)}
               series={[
-                { key: "clicks", label: "Clicks", color: "#FF0000", values: o.series.map((d) => d.clicks), area: true },
-                { key: "bounced", label: "Bounces", color: "#A16207", values: o.series.map((d) => d.bounced) },
-                { key: "complaints", label: "Complaints", color: "#0B1233", values: o.series.map((d) => d.complaints), dashed: true },
+                { key: "clicks", label: "Clicks", tone: "brand", values: o.series.map((d) => d.clicks), area: true },
+                { key: "bounced", label: "Bounces", tone: "warning", values: o.series.map((d) => d.bounced) },
+                { key: "complaints", label: "Complaints", tone: "danger", values: o.series.map((d) => d.complaints), dashed: true },
               ]}
             />
           </div>
@@ -103,7 +103,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
         </Card>
         <Card>
           <CardHeader title="Plan mix" description="Workspaces by plan" />
-          <BarList empty="No workspaces yet." barClass="bg-navy" items={plans.map(([plan, count]) => ({ label: plan.charAt(0).toUpperCase() + plan.slice(1), value: count, sub: `${((count / Math.max(s.workspaces, 1)) * 100).toFixed(0)}% of workspaces` }))} />
+          <BarList empty="No workspaces yet." barClass="bg-brand-600" items={plans.map(([plan, count]) => ({ label: plan.charAt(0).toUpperCase() + plan.slice(1), value: count, sub: `${((count / Math.max(s.workspaces, 1)) * 100).toFixed(0)}% of workspaces` }))} />
         </Card>
       </div>
 

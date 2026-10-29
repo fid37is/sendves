@@ -92,8 +92,8 @@ export default async function CampaignPage({ params }: { params: { id: string };
               ariaLabel="Clicks and unique clickers per day for this campaign"
               dates={series.map((d) => d.date)}
               series={[
-                { key: "clicks", label: "Clicks", color: "#FF0000", values: series.map((d) => d.clicks), area: true },
-                { key: "unique", label: "Unique clickers", color: "#0B1233", values: series.map((d) => d.uniqueClicks), dashed: true },
+                { key: "clicks", label: "Clicks", tone: "brand", values: series.map((d) => d.clicks), area: true },
+                { key: "unique", label: "Unique clickers", tone: "accent", values: series.map((d) => d.uniqueClicks), dashed: true },
               ]}
             />
           </div>
@@ -118,7 +118,7 @@ export default async function CampaignPage({ params }: { params: { id: string };
             {links.map((l) => (
               <tr key={l.url}>
                 <TD className="max-w-[360px] break-all">{l.url}</TD>
-                <TD className="w-48"><div className="h-2 rounded-full bg-lavender-100"><div className="h-2 rounded-full bg-brand-700" style={{ width: `${(l.clicks / maxLinkClicks) * 100}%` }} /></div></TD>
+                <TD className="w-48"><div className="h-2 rounded-full bg-accent-100"><div className="h-2 rounded-full bg-brand-700" style={{ width: `${(l.clicks / maxLinkClicks) * 100}%` }} /></div></TD>
                 <TD className="font-semibold text-ink">{formatNumber(l.clicks)}</TD>
                 <TD>{formatNumber(l.uniqueClicks)}</TD>
               </tr>

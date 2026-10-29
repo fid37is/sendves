@@ -6,15 +6,15 @@ type Variant = "primary" | "secondary" | "outline" | "ghost" | "danger" | "light
 type Size = "sm" | "md" | "lg";
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all duration-200 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60";
+  "inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all duration-200 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60";
 
 const variants: Record<Variant, string> = {
   primary: "bg-brand-700 text-white shadow-sm hover:bg-brand-800 hover:shadow-lg hover:shadow-brand-700/30",
   secondary: "bg-brand-50 text-brand-800 hover:bg-brand-100",
-  outline: "border border-mist bg-white text-ink hover:border-ink/30 hover:bg-mist-50",
+  outline: "border border-mist bg-white text-ink hover:border-ink/30 hover:bg-mist-100",
   ghost: "text-ink hover:bg-mist-100",
-  danger: "bg-danger text-white hover:bg-red-700",
-  light: "bg-white text-brand-800 shadow-sm hover:bg-brand-50 hover:shadow-lg hover:shadow-navy/30",
+  danger: "bg-danger text-white hover:bg-danger/90",
+  light: "bg-white text-brand-800 shadow-sm hover:bg-brand-50 hover:shadow-lg hover:shadow-night/30",
   outlineLight: "border border-white/30 bg-transparent text-white hover:bg-white/10",
 };
 

@@ -1,4 +1,5 @@
 import { escapeHtml, personalize } from "@/lib/email/blocks";
+import { emailTheme } from "@/config/brand";
 import { serverEnv } from "@/lib/env.server";
 import { clickSig, openSig, unsubscribeToken } from "@/lib/tokens";
 import type { OutboundEmail } from "./providers/types";
@@ -52,9 +53,9 @@ export function buildEmail(args: {
   if (sendId) html = rewriteLinks(html, sendId);
 
   const footer =
-    `<p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:#6B7290;text-align:center;">` +
+    `<p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:${emailTheme.muted};text-align:center;">` +
     `You are receiving this email because you subscribed to ${escapeHtml(workspace.name)}.<br>` +
-    `<a href="${unsubUrl}" style="color:#6B7290;">Unsubscribe</a><br>` +
+    `<a href="${unsubUrl}" style="color:${emailTheme.muted};">Unsubscribe</a><br>` +
     `${escapeHtml(workspace.business_address ?? "")}</p>`;
   const pixel =
     sendId && workspace.track_opens

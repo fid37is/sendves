@@ -35,7 +35,7 @@ export function SiteHeader() {
     <header
       className={cn(
         "sticky top-0 z-40 border-b transition-all duration-300",
-        scrolled ? "border-mist bg-white/85 shadow-sm backdrop-blur-md" : "border-transparent bg-white",
+        scrolled ? "border-mist bg-canvas/85 shadow-sm backdrop-blur-md" : "border-transparent bg-canvas",
       )}
     >
       <div className={cn("mx-auto flex max-w-page items-center justify-between px-5 transition-all duration-300 sm:px-8", scrolled ? "h-[72px]" : "h-20")}>
@@ -95,7 +95,7 @@ export function SiteHeader() {
       {open ? (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
           <button type="button" className="animate-fade-in absolute inset-0 bg-ink/50 backdrop-blur-[2px]" onClick={() => setOpen(false)} aria-label="Close menu" />
-          <div className="animate-slide-in-right absolute inset-y-0 right-0 flex w-[88%] max-w-sm flex-col bg-white shadow-2xl">
+          <div className="animate-slide-in-right absolute inset-y-0 right-0 flex w-[88%] max-w-sm flex-col bg-canvas shadow-2xl">
             <div className="flex h-[72px] items-center justify-between border-b border-mist px-5">
               <Logo />
               <button type="button" onClick={() => setOpen(false)} className="inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-mist-100" aria-label="Close menu">

@@ -1,5 +1,6 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
-import { getSessionUser } from "@/lib/auth/session";
+import { getAuthUser, getSessionUser } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createAdminClient, type Db } from "@/lib/supabase/admin";
 import { go } from "@/lib/flash";
@@ -27,28 +28,32 @@ export type Ctx = { user: SessionUser; workspace: Workspace | null; db: Db | nul
  * The signed-in user plus their workspace. `workspace` and `db` are null only when the service
  * role key is missing, so pages can show empty states instead of crashing.
  */
-export async function getContext(): Promise<Ctx | null> {
-  const user = await getSessionUser();
-  if (!user) return null;
-  if (!isSupabaseConfigured) return { user, workspace: null, db: null };
+export const getContext = cache(async (): Promise<Ctx | null> => {
+  const authUser = await getAuthUser(); // verified once per request, shared with the layout
+  if (!authUser) return null;
+  if (!isSupabaseConfigured) {
+    const user = await getSessionUser();
+    return user ? { user, workspace: null, db: null } : null;
+  }
 
   let db: Db;
   try {
     db = createAdminClient();
   } catch {
-    return { user, workspace: null, db: null };
+    const user = await getSessionUser();
+    return user ? { user, workspace: null, db: null } : null;
   }
 
-  const { data } = await db
-    .from("workspace_members")
-    .select("workspaces(*)")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
+  // The profile and the workspace do not depend on each other, so they load in parallel.
+  const [user, { data }] = await Promise.all([
+    getSessionUser(),
+    db.from("workspace_members").select("workspaces(*)").eq("user_id", authUser.id).limit(1).maybeSingle(),
+  ]);
+  if (!user) return null;
 
   const ws = (data as any)?.workspaces as Workspace | undefined;
   return { user, workspace: ws ?? null, db };
-}
+});
 
 /** For server actions: guarantees a signed-in user with a real workspace, or redirects. */
 export async function requireWorkspace(back = "/app"): Promise<{ user: SessionUser; workspace: Workspace; db: Db }> {

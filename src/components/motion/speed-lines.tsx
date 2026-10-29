@@ -19,7 +19,7 @@ export function SpeedLines({ tone = "brand", className }: { tone?: "brand" | "li
       {lines.map((l, i) => (
         <span
           key={i}
-          className={cn("animate-drift absolute left-0 rounded-full", tone === "brand" ? "bg-white/[0.13]" : "bg-brand-500/[0.12]")}
+          className={cn("animate-drift absolute left-0 rounded-full", tone === "brand" ? "bg-accent-400/[0.20]" : "bg-brand-500/[0.12]")}
           style={{ top: `${l.top}%`, width: l.w, height: l.h, animationDuration: `${l.d}s`, animationDelay: `${l.delay}s` }}
         />
       ))}

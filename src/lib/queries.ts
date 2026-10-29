@@ -36,10 +36,10 @@ const EMPTY_WORKSPACE = { name: "My workspace", plan: "Free", contactsUsed: 0, c
 
 // ── Dashboard ─────────────────────────────────────────────────────
 
-export async function getCampaigns(ctx: Ctx): Promise<CampaignRow[]> {
+export async function getCampaigns(ctx: Ctx, limit = 200): Promise<CampaignRow[]> {
   if (!ctx.db || !ctx.workspace) return [];
   const { data: rows } = await ctx.db.from("campaigns").select("id, name, subject, status, review_status, list_id, scheduled_at, completed_at, created_at, lists(name)")
-    .eq("workspace_id", ctx.workspace.id).order("created_at", { ascending: false }).limit(200);
+    .eq("workspace_id", ctx.workspace.id).order("created_at", { ascending: false }).limit(limit);
   const ids = (rows ?? []).map((r: any) => r.id);
   const { data: stats } = ids.length ? await ctx.db.from("campaign_stats").select("*").in("campaign_id", ids) : { data: [] as any[] };
   const byId = new Map((stats ?? []).map((s: any) => [s.campaign_id, s]));
@@ -74,7 +74,7 @@ export async function getOverview(ctx: Ctx) {
     db.from("sends").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).gte("sent_at", monthStart()),
     db.from("sending_domains").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).eq("status", "verified"),
     db.from("campaigns").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).in("status", ["sending", "sent"]),
-    getCampaigns(ctx),
+    getCampaigns(ctx, 5),
     getDailyActivity(db, { days: 30, workspaceId: ws.id }),
     getTopLinks(db, ws.id, { days: 30, limit: 5 }),
   ]);
@@ -83,7 +83,7 @@ export async function getOverview(ctx: Ctx) {
   return {
     workspace: { name: ws.name, plan: ws.plan.charAt(0).toUpperCase() + ws.plan.slice(1), contactsUsed: contacts ?? 0, contactsLimit: ws.max_contacts, sendsUsed: sends ?? 0, sendsLimit: limits.monthlySends, dailyLimit: ws.daily_send_limit },
     checklist: [true, Boolean(ws.business_address), (domains ?? 0) > 0, (contacts ?? 0) > 0, (sentCampaigns ?? 0) > 0],
-    recent: campaigns.slice(0, 5),
+    recent: campaigns,
     series, totals, links,
     avgClickRate: pct(totals.uniqueClicks, totals.sent),
   };

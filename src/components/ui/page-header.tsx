@@ -31,14 +31,14 @@ export function StatCard({
   const good = delta ? (delta.dir === "flat" ? null : (delta.dir === "up") === higherIsBetter) : null;
   const Arrow = delta?.dir === "up" ? ArrowUpRight : delta?.dir === "down" ? ArrowDownRight : ArrowRight;
   return (
-    <div className="rounded-2xl border border-mist bg-white p-5 transition-shadow duration-300 hover:shadow-lg hover:shadow-navy/5">
+    <div className="rounded-2xl border border-mist bg-white p-5 transition-shadow duration-300 hover:shadow-lg hover:shadow-night/5">
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium text-ink-muted">{label}</p>
         {delta ? (
           <span
             className={cn(
               "inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold",
-              good === null ? "bg-lavender-100 text-ink-soft" : good ? "bg-green-50 text-success" : "bg-red-50 text-danger",
+              good === null ? "bg-accent-100 text-ink-soft" : good ? "bg-success-soft text-success" : "bg-danger-soft text-danger",
             )}
             title="Compared with the previous period"
           >

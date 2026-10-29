@@ -1,9 +1,29 @@
 import { cn } from "@/lib/utils";
 
+/**
+ * Series colours are semantic, never hex: they resolve to palette tokens, so a re-theme in
+ * src/config/brand.ts recolours every chart. Pick by meaning:
+ *  brand = the primary metric (clicks) · accent = a companion metric · ink = volume/baseline
+ *  warning = soft risk (bounces) · danger = hard risk (complaints)
+ * Every tone has at least 3:1 contrast against white, as required for graphics.
+ */
+export type ChartTone = "brand" | "accent" | "ink" | "warning" | "danger";
+
+const TONES: Record<ChartTone, { stroke: string; fill: string; border: string }> = {
+  brand: { stroke: "stroke-brand-700", fill: "fill-brand-700", border: "border-brand-700" },
+  accent: { stroke: "stroke-accent-600", fill: "fill-accent-600", border: "border-accent-600" },
+  ink: { stroke: "stroke-ink-soft", fill: "fill-ink-soft", border: "border-ink-soft" },
+  warning: { stroke: "stroke-warning", fill: "fill-warning", border: "border-warning" },
+  danger: { stroke: "stroke-danger", fill: "fill-danger", border: "border-danger" },
+};
+
+/** Unknown or missing tones fall back to the brand tone instead of crashing the page. */
+const toneOf = (tone: ChartTone | undefined) => TONES[tone as ChartTone] ?? TONES.brand;
+
 export type ChartSeries = {
   key: string;
   label: string;
-  color: string;
+  tone: ChartTone;
   values: number[];
   /** Fills the area under the line. */
   area?: boolean;
@@ -62,24 +82,25 @@ export function TrendChart({
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full overflow-visible" role="img" aria-label={ariaLabel}>
         {ticks.map((t) => (
           <g key={t}>
-            <line x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} stroke="#E4DCEF" strokeWidth={1} strokeDasharray={t === 0 ? undefined : "3 5"} />
-            <text x={pad.l - 8} y={y(t) + 4} textAnchor="end" fontSize={11} fill="#6B7290">{compact.format(t)}</text>
+            <line x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} className="stroke-mist" strokeWidth={1} strokeDasharray={t === 0 ? undefined : "3 5"} />
+            <text x={pad.l - 8} y={y(t) + 4} textAnchor="end" fontSize={11} className="fill-ink-muted">{compact.format(t)}</text>
           </g>
         ))}
 
         {dates.map((d, i) =>
           i % labelEvery === 0 || i === n - 1 ? (
-            <text key={d} x={x(i)} y={H - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} fontSize={11} fill="#6B7290">{label(d)}</text>
+            <text key={d} x={x(i)} y={H - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} fontSize={11} className="fill-ink-muted">{label(d)}</text>
           ) : null,
         )}
 
         {series.map((s) => {
           const pts = s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
           const line = `M${pts.join(" L")}`;
+          const tone = toneOf(s.tone);
           return (
             <g key={s.key}>
-              {s.area && n > 1 ? <path d={`${line} L${x(n - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`} fill={s.color} fillOpacity={0.1} /> : null}
-              <path d={line} fill="none" stroke={s.color} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dashed ? "5 5" : undefined} />
+              {s.area && n > 1 ? <path d={`${line} L${x(n - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`} className={tone.fill} fillOpacity={0.1} stroke="none" /> : null}
+              <path d={line} fill="none" className={tone.stroke} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dashed ? "5 5" : undefined} />
             </g>
           );
         })}
@@ -87,9 +108,9 @@ export function TrendChart({
         {/* Hover columns: one per day, with a guide line and an exact-values tooltip. */}
         {dates.map((d, i) => (
           <g key={`h${d}`} className="group">
-            <line x1={x(i)} x2={x(i)} y1={pad.t} y2={pad.t + innerH} stroke="#0B1233" strokeOpacity={0.25} strokeWidth={1} className="opacity-0 transition-opacity group-hover:opacity-100" />
+            <line x1={x(i)} x2={x(i)} y1={pad.t} y2={pad.t + innerH} strokeWidth={1} className="stroke-ink/25 opacity-0 transition-opacity group-hover:opacity-100" />
             {series.map((s) => (
-              <circle key={s.key} cx={x(i)} cy={y(s.values[i] ?? 0)} r={3.5} fill="#fff" stroke={s.color} strokeWidth={2} className="opacity-0 transition-opacity group-hover:opacity-100" />
+              <circle key={s.key} cx={x(i)} cy={y(s.values[i] ?? 0)} r={3.5} strokeWidth={2} className={cn("fill-white opacity-0 transition-opacity group-hover:opacity-100", toneOf(s.tone).stroke)} />
             ))}
             <rect x={x(i) - step / 2} y={pad.t} width={Math.max(step, 4)} height={innerH} fill="transparent">
               <title>{`${label(d)}\n${series.map((s) => `${s.label}: ${full.format(s.values[i] ?? 0)}`).join("\n")}`}</title>
@@ -98,14 +119,14 @@ export function TrendChart({
         ))}
 
         {empty ? (
-          <text x={pad.l + innerW / 2} y={pad.t + innerH / 2} textAnchor="middle" fontSize={13} fill="#6B7290">No activity in this period yet</text>
+          <text x={pad.l + innerW / 2} y={pad.t + innerH / 2} textAnchor="middle" fontSize={13} className="fill-ink-muted">No activity in this period yet</text>
         ) : null}
       </svg>
 
       <figcaption className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs font-semibold text-ink-soft">
         {series.map((s) => (
           <span key={s.key} className="inline-flex items-center gap-2">
-            <span className="h-0.5 w-5 rounded-full" style={{ backgroundColor: s.color, ...(s.dashed ? { backgroundImage: "none", opacity: 0.8 } : {}) }} aria-hidden="true" />
+            <span className={cn("w-5 border-t-2", toneOf(s.tone).border, s.dashed && "border-dashed")} aria-hidden="true" />
             {s.label}
             <span className="font-medium text-ink-muted">{full.format(s.values.reduce((a, b) => a + b, 0))}</span>
           </span>
@@ -139,7 +160,7 @@ export function BarList({
             </span>
             <span className="shrink-0 font-bold text-ink">{format(it.value)}</span>
           </div>
-          <div className="mt-1.5 h-2 rounded-full bg-lavender-100">
+          <div className="mt-1.5 h-2 rounded-full bg-accent-100">
             <div className={cn("h-2 rounded-full", barClass)} style={{ width: `${Math.max(2, (it.value / max) * 100)}%` }} />
           </div>
           {it.sub ? <p className="mt-1 text-xs text-ink-muted">{it.sub}</p> : null}
@@ -163,10 +184,10 @@ export function Funnel({ stages }: { stages: { label: string; value: number; not
               {i > 0 && stages[0].value > 0 ? ` · ${((s.value / top) * 100).toFixed(1)}%` : ""}
             </span>
           </div>
-          <div className="mt-1.5 h-7 rounded-lg bg-lavender-100">
+          <div className="mt-1.5 h-7 rounded-lg bg-accent-100">
             <div
-              className={cn("h-7 rounded-lg", i === 0 ? "bg-navy" : i === stages.length - 1 ? "bg-brand-700" : "bg-navy-700")}
-              style={{ width: `${Math.max(s.value > 0 ? 2 : 0, (s.value / top) * 100)}%`, opacity: i === 0 ? 1 : 0.9 }}
+              className={cn("h-7 rounded-lg", i === 0 ? "bg-brand-800" : i === stages.length - 1 ? "bg-accent-500" : "bg-brand-600")}
+              style={{ width: `${Math.max(s.value > 0 ? 2 : 0, (s.value / top) * 100)}%` }}
             />
           </div>
           {s.note ? <p className="mt-1 text-xs text-ink-muted">{s.note}</p> : null}
@@ -179,7 +200,7 @@ export function Funnel({ stages }: { stages: { label: string; value: number; not
 /** Segmented range picker (links, so it works without JavaScript). */
 export function RangeTabs({ basePath, current, options = [7, 30, 90] }: { basePath: string; current: number; options?: number[] }) {
   return (
-    <nav className="inline-flex rounded-full border border-lavender bg-white p-1" aria-label="Date range">
+    <nav className="inline-flex rounded-full border border-accent-200 bg-white p-1" aria-label="Date range">
       {options.map((d) => (
         <a
           key={d}
@@ -187,7 +208,7 @@ export function RangeTabs({ basePath, current, options = [7, 30, 90] }: { basePa
           aria-current={d === current ? "true" : undefined}
           className={cn(
             "rounded-full px-4 py-1.5 text-sm font-semibold transition-colors",
-            d === current ? "bg-navy text-white" : "text-ink-soft hover:bg-lavender-100",
+            d === current ? "bg-brand-700 text-white" : "text-ink-soft hover:bg-accent-100",
           )}
         >
           {d} days
