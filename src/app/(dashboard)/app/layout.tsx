@@ -12,7 +12,6 @@ const nav: ShellNavItem[] = [
   { label: "Campaigns", href: "/app/campaigns", icon: "send" },
   { label: "Reports", href: "/app/reports", icon: "chart" },
   { label: "Contacts", href: "/app/contacts", icon: "users" },
-  { label: "Lists", href: "/app/lists", icon: "review" },
   { label: "Templates", href: "/app/templates", icon: "template" },
   { label: "Sending domains", href: "/app/domains", icon: "globe" },
   { label: "Billing", href: "/app/billing", icon: "card" },

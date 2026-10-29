@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
 import { siteConfig } from "@/config/site";
 import { Toaster } from "@/components/ui/toast";
+import { ConfirmProvider } from "@/components/ui/confirm";
 import { themeColor } from "@/config/brand";
 // @ts-expect-error CSS side-effect imports are handled by Next.js.
 import "./globals.css";
@@ -46,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${sans.variable} ${display.variable}`}>
       <body className="min-h-screen bg-canvas font-sans text-ink antialiased">
-        {children}
+        <ConfirmProvider>{children}</ConfirmProvider>
         <Toaster />
       </body>
     </html>

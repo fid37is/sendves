@@ -73,7 +73,12 @@ export const palette = {
   /** Status colours. `soft` is the tinted background that pairs with the text colour. */
   success: { DEFAULT: "#15803D", soft: "#EDF8F1" },
   warning: { DEFAULT: "#A16207", soft: "#FDF6E3" },
-  danger: { DEFAULT: "#C62E22", soft: "#FDEEEC" },
+  /**
+   * Brick, not signal red: a muted, warm red that sits with the teal and warm white instead of shouting.
+   * Contrast (all WCAG AA): white on DEFAULT 6.1, DEFAULT on white 6.1, on canvas 5.8, on soft 5.3.
+   * `strong` is the hover/pressed shade (white on strong 8.3).
+   */
+  danger: { DEFAULT: "#A4433A", soft: "#F8EDE9", strong: "#86342D" },
 } as const;
 
 export type Palette = typeof palette;

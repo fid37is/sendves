@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import { AddContactsDrawer } from "@/components/dashboard/add-contacts-drawer";
 import type { AddContactsResult } from "@/app/(dashboard)/app/contacts/actions";
 import type { AutosaveResult } from "@/app/(dashboard)/app/campaigns/actions";
@@ -40,6 +41,7 @@ function blank(type: Exclude<Block["type"], "html">): Block {
 }
 
 export function CampaignEditor({ campaign, domains, lists: initialLists, workspace, actions }: Props) {
+  const confirm = useConfirm();
   const [blocks, setBlocks] = useState<Block[]>(campaign.blocks);
   const [lists, setLists] = useState(initialLists);
   const [listId, setListId] = useState(campaign.list_id ?? "");
@@ -257,10 +259,43 @@ export function CampaignEditor({ campaign, domains, lists: initialLists, workspa
             ) : null}
             <div className="flex flex-wrap gap-3">
               <Button type="submit" formAction={actions.test} variant="secondary">Send test to me</Button>
-              <Button type="submit" formAction={actions.submit} onClick={(e) => { if (!window.confirm(mode === "now" ? "Send this campaign to your audience?" : "Schedule this campaign?")) e.preventDefault(); }}>
+              <Button
+                type="submit"
+                formAction={actions.submit}
+                onClick={async (e) => {
+                  // Ask first; submit with this button (so its formAction is used) only after a yes.
+                  const button = e.currentTarget;
+                  const form = button.form;
+                  e.preventDefault();
+                  const ok = await confirm({
+                    title: mode === "now" ? "Send this campaign now?" : "Schedule this campaign?",
+                    description: mode === "now" ? "It goes to everyone in the selected audience straight away. Emails can’t be recalled once sent." : "It will be sent to your audience at the time you chose.",
+                    confirmLabel: mode === "now" ? "Send campaign" : "Schedule campaign",
+                  });
+                  if (ok) form?.requestSubmit(button);
+                }}
+              >
                 {mode === "now" ? "Send campaign" : "Schedule campaign"}
               </Button>
-              <Button type="submit" formAction={actions.remove} variant="ghost" onClick={(e) => { if (!window.confirm("Delete this draft?")) e.preventDefault(); }}>Delete draft</Button>
+              <Button
+                type="submit"
+                formAction={actions.remove}
+                variant="ghost"
+                onClick={async (e) => {
+                  const button = e.currentTarget;
+                  const form = button.form;
+                  e.preventDefault();
+                  const ok = await confirm({
+                    title: "Delete this draft?",
+                    description: "The draft and everything you’ve written in it are removed. This can’t be undone.",
+                    confirmLabel: "Delete draft",
+                    tone: "danger",
+                  });
+                  if (ok) form?.requestSubmit(button);
+                }}
+              >
+                Delete draft
+              </Button>
             </div>
           </div>
         </Card>

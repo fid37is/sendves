@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { ConfirmSubmitButton } from "@/components/ui/confirm";
 import { Card, CardHeader } from "@/components/ui/card";
 import { PageToasts, type ToastKind } from "@/components/ui/toast";
 import { PageHeader, StatCard } from "@/components/ui/page-header";
@@ -15,7 +16,7 @@ import { formatNumber } from "@/lib/utils";
 import type { SearchParams } from "@/types";
 import {
   cancelCampaignAction, deleteCampaignAction, pauseCampaignAction, resumeCampaignAction,
-  saveCampaignAction, sendTestAction, submitCampaignAction,
+  autosaveCampaignAction, sendTestAction, submitCampaignAction,
 } from "../actions";
 
 export const metadata: Metadata = { title: "Campaign" };
@@ -39,7 +40,7 @@ export default async function CampaignPage({ params }: { params: { id: string };
           domains={domains.map((d) => ({ id: d.id, domain: d.domain, status: d.status }))}
           lists={lists.map((l) => ({ id: l.id, name: l.name }))}
           workspace={{ name: ctx.workspace.name, business_address: ctx.workspace.business_address }}
-          actions={{ save: saveCampaignAction, test: sendTestAction, submit: submitCampaignAction, remove: deleteCampaignAction }}
+          actions={{ autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, remove: deleteCampaignAction }}
         />
       </>
     );
@@ -67,8 +68,39 @@ export default async function CampaignPage({ params }: { params: { id: string };
             <StatusBadge status={c.status} />
             {canPause ? <form action={pauseCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" variant="outline" size="sm">Pause</Button></form> : null}
             {canResume ? <form action={resumeCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" size="sm">Resume</Button></form> : null}
-            {canCancel ? <form action={cancelCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" variant="danger" size="sm">Cancel</Button></form> : null}
-            {c.status === "cancelled" ? <form action={deleteCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" variant="outline" size="sm">Delete</Button></form> : null}
+            {canCancel ? (
+              <ConfirmSubmitButton
+                action={cancelCampaignAction}
+                fields={{ id: c.id }}
+                variant="danger"
+                size="sm"
+                confirm={{
+                  title: "Cancel this campaign?",
+                  description: "Sending stops and anything not yet sent is skipped. Emails already delivered can’t be recalled, and this can’t be undone.",
+                  confirmLabel: "Cancel campaign",
+                  cancelLabel: "Keep campaign",
+                  tone: "danger",
+                }}
+              >
+                Cancel
+              </ConfirmSubmitButton>
+            ) : null}
+            {c.status === "cancelled" ? (
+              <ConfirmSubmitButton
+                action={deleteCampaignAction}
+                fields={{ id: c.id }}
+                variant="outline"
+                size="sm"
+                confirm={{
+                  title: "Delete this campaign?",
+                  description: "The campaign and its results are removed. This can’t be undone.",
+                  confirmLabel: "Delete campaign",
+                  tone: "danger",
+                }}
+              >
+                Delete
+              </ConfirmSubmitButton>
+            ) : null}
           </div>
         }
       />

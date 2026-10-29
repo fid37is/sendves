@@ -9,6 +9,9 @@ import { checkEmail } from "@/lib/validation/email";
 import { parseContactsCsv } from "@/server/imports";
 
 const MAX_BYTES = 5 * 1024 * 1024;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Most contacts one bulk action can touch (the table shows 25 per page). */
+const MAX_SELECTION = 100;
 
 async function remainingRoom(ctx: Awaited<ReturnType<typeof requireWorkspace>>) {
   const { count } = await ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id);
@@ -147,7 +150,7 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
     toInsert.length ? `${toInsert.length} ${toInsert.length === 1 ? "contact" : "contacts"} added` : "",
     alreadyThere.length ? `${alreadyThere.length} already in your contacts` : "",
     roles ? `${roles} role ${roles === 1 ? "address" : "addresses"} like info@ (they often perform poorly)` : "",
-  ].filter(Boolean).join(", ") + (list ? ` · audience: ${list.name}.` : ".");
+  ].filter(Boolean).join(", ") + (list ? ` · list: ${list.name}.` : ".");
   return { added: toInsert.length + alreadyThere.length, message, rowErrors, list };
 }
 
@@ -169,8 +172,15 @@ export async function importContactsAction(formData: FormData) {
   const truncated = Math.max(0, rows.length - room);
   rows = rows.slice(0, room);
 
-  // List: existing id, or a new list name.
+  // List: existing id (must belong to this workspace), or a new list name.
   let listId = String(formData.get("listId") ?? "");
+  if (listId) {
+    const { data: own } = UUID_RE.test(listId)
+      ? await ctx.db.from("lists").select("id").eq("id", listId).eq("workspace_id", ctx.workspace.id).maybeSingle()
+      : { data: null };
+    if (!own) go(back, "err", "That list no longer exists. Choose another list.");
+    listId = own?.id ?? "";
+  }
   const newList = String(formData.get("newList") ?? "").trim();
   if (newList) {
     const { data: l, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name: newList.slice(0, 80) }).select("id").single();
@@ -184,7 +194,7 @@ export async function importContactsAction(formData: FormData) {
   let suppressed = 0;
   for (let i = 0; i < rows.length; i += 500) {
     let chunk = rows.slice(i, i + 500);
-    const { data: blocked } = await ctx.db.from("suppression_entries").select("email").is("workspace_id", null).in("email", chunk.map((r) => r.email));
+    const { data: blocked } = await ctx.db.from("suppression_entries").select("email").or(`workspace_id.is.null,workspace_id.eq.${ctx.workspace.id}`).in("email", chunk.map((r) => r.email));
     const blockedSet = new Set((blocked ?? []).map((b: any) => b.email.toLowerCase()));
     suppressed += chunk.filter((r) => blockedSet.has(r.email)).length;
     chunk = chunk.filter((r) => !blockedSet.has(r.email));
@@ -213,15 +223,145 @@ export async function importContactsAction(formData: FormData) {
     truncated ? `${truncated} not imported because you reached your plan limit` : "",
   ].filter(Boolean);
   revalidatePath("/app/contacts");
-  go("/app/contacts", "ok", `${notes.join(", ")}.`);
+  go(listId ? `/app/contacts?list=${listId}` : "/app/contacts", "ok", `${notes.join(", ")}.`);
 }
 
-export async function createListAction(formData: FormData) {
-  const ctx = await requireWorkspace("/app/lists");
-  const name = String(formData.get("name") ?? "").trim().slice(0, 80);
-  if (!name) go("/app/lists", "err", "Give the list a name.");
-  const { error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name });
-  if (error) go("/app/lists", "err", error.code === "23505" ? "You already have a list with that name." : "Couldn’t create the list.");
-  revalidatePath("/app/lists");
-  go("/app/lists", "ok", "List created.");
+// ── Lists ───────────────────────────────────────────────────────────
+
+export type ListActionResult = { ok: boolean; message?: string; error?: string; id?: string };
+
+type Ws = Awaited<ReturnType<typeof requireWorkspace>>;
+
+const cleanName = (v: unknown) => String(v ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
+
+/** Valid, de-duplicated ids from the client, or null when the selection is empty or too large. */
+function cleanIds(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const ids = Array.from(new Set(v.map(String).filter((id) => UUID_RE.test(id))));
+  return ids.length > 0 && ids.length <= MAX_SELECTION ? ids : null;
+}
+
+async function ownedList(ctx: Ws, id: unknown) {
+  const listId = String(id ?? "");
+  if (!UUID_RE.test(listId)) return null;
+  const { data } = await ctx.db.from("lists").select("id, name").eq("id", listId).eq("workspace_id", ctx.workspace.id).maybeSingle();
+  return (data as { id: string; name: string } | null) ?? null;
+}
+
+/** Only ids of contacts that belong to this workspace survive. */
+async function ownedContactIds(ctx: Ws, ids: string[]) {
+  const { data } = await ctx.db.from("contacts").select("id").eq("workspace_id", ctx.workspace.id).in("id", ids);
+  return (data ?? []).map((c: { id: string }) => c.id);
+}
+
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+const SELECTION_ERROR = `Select between 1 and ${MAX_SELECTION} contacts.`;
+
+export async function createListAction(input: { name: string }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const name = cleanName(input?.name);
+  if (!name) return { ok: false, error: "Give the list a name." };
+  const { data, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name }).select("id").single();
+  if (error || !data) return { ok: false, error: error?.code === "23505" ? "You already have a list with that name." : "Couldn’t create the list." };
+  revalidatePath("/app/contacts");
+  return { ok: true, id: data.id, message: `List “${name}” created.` };
+}
+
+export async function renameListAction(input: { listId: string; name: string }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const list = await ownedList(ctx, input?.listId);
+  if (!list) return { ok: false, error: "That list no longer exists." };
+  const name = cleanName(input?.name);
+  if (!name) return { ok: false, error: "Give the list a name." };
+  const { error } = await ctx.db.from("lists").update({ name }).eq("id", list.id).eq("workspace_id", ctx.workspace.id);
+  if (error) return { ok: false, error: error.code === "23505" ? "You already have a list with that name." : "Couldn’t rename the list." };
+  revalidatePath("/app/contacts");
+  revalidatePath("/app/campaigns");
+  return { ok: true, message: "List renamed." };
+}
+
+/**
+ * Deletes a list (the contacts stay). Blocked while an unfinished campaign still targets it:
+ * deleting would clear that campaign's audience, and a campaign with no audience goes to everyone.
+ */
+export async function deleteListAction(input: { listId: string }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const list = await ownedList(ctx, input?.listId);
+  if (!list) return { ok: false, error: "That list no longer exists." };
+
+  const { count } = await ctx.db.from("campaigns").select("id", { count: "exact", head: true })
+    .eq("workspace_id", ctx.workspace.id).eq("list_id", list.id).in("status", ["draft", "scheduled", "sending", "paused"]);
+  if (count && count > 0) {
+    return { ok: false, error: `“${list.name}” is the audience of ${plural(count, "campaign", "campaigns")} that haven’t finished sending. Change their audience or delete them first.` };
+  }
+
+  const { error } = await ctx.db.from("lists").delete().eq("id", list.id).eq("workspace_id", ctx.workspace.id);
+  if (error) return { ok: false, error: "Couldn’t delete the list." };
+  revalidatePath("/app/contacts");
+  revalidatePath("/app/campaigns");
+  return { ok: true, message: `List “${list.name}” deleted. Its contacts are still in your account.` };
+}
+
+// ── Contacts inside lists ───────────────────────────────────────────
+
+export async function addToListAction(input: { listId: string; contactIds: string[] }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const ids = cleanIds(input?.contactIds);
+  if (!ids) return { ok: false, error: SELECTION_ERROR };
+  const list = await ownedList(ctx, input?.listId);
+  if (!list) return { ok: false, error: "Choose a list." };
+  const owned = await ownedContactIds(ctx, ids);
+  if (owned.length === 0) return { ok: false, error: "Those contacts no longer exist." };
+
+  const { error } = await ctx.db.from("list_members").upsert(owned.map((contact_id) => ({ list_id: list.id, contact_id })), { onConflict: "list_id,contact_id", ignoreDuplicates: true });
+  if (error) return { ok: false, error: "Couldn’t add the contacts to the list. Try again." };
+  revalidatePath("/app/contacts");
+  return { ok: true, message: `${plural(owned.length, "contact", "contacts")} in “${list.name}”.` };
+}
+
+export async function moveContactsAction(input: { fromListId: string; toListId: string; contactIds: string[] }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const ids = cleanIds(input?.contactIds);
+  if (!ids) return { ok: false, error: SELECTION_ERROR };
+  const [from, to] = await Promise.all([ownedList(ctx, input?.fromListId), ownedList(ctx, input?.toListId)]);
+  if (!from || !to) return { ok: false, error: "That list no longer exists." };
+  if (from.id === to.id) return { ok: false, error: "Choose a different list to move them to." };
+  const owned = await ownedContactIds(ctx, ids);
+  if (owned.length === 0) return { ok: false, error: "Those contacts no longer exist." };
+
+  // Add first, remove second: if anything fails, nobody ends up in no list.
+  const { error: addError } = await ctx.db.from("list_members").upsert(owned.map((contact_id) => ({ list_id: to.id, contact_id })), { onConflict: "list_id,contact_id", ignoreDuplicates: true });
+  if (addError) return { ok: false, error: "Couldn’t move the contacts. Try again." };
+  const { error: removeError } = await ctx.db.from("list_members").delete().eq("list_id", from.id).in("contact_id", owned);
+  revalidatePath("/app/contacts");
+  if (removeError) return { ok: false, error: `They were added to “${to.name}”, but couldn’t be removed from “${from.name}”. Remove them from it to finish.` };
+  return { ok: true, message: `${plural(owned.length, "contact", "contacts")} moved from “${from.name}” to “${to.name}”.` };
+}
+
+export async function removeFromListAction(input: { listId: string; contactIds: string[] }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const ids = cleanIds(input?.contactIds);
+  if (!ids) return { ok: false, error: SELECTION_ERROR };
+  const list = await ownedList(ctx, input?.listId);
+  if (!list) return { ok: false, error: "That list no longer exists." };
+  const owned = await ownedContactIds(ctx, ids);
+
+  const { error } = await ctx.db.from("list_members").delete().eq("list_id", list.id).in("contact_id", owned);
+  if (error) return { ok: false, error: "Couldn’t remove the contacts from the list. Try again." };
+  revalidatePath("/app/contacts");
+  return { ok: true, message: `${plural(owned.length, "contact", "contacts")} removed from “${list.name}”. They’re still in your contacts.` };
+}
+
+/** Permanently deletes contacts. Unsubscribes stay on the suppression list, so they can’t be emailed again. */
+export async function deleteContactsAction(input: { contactIds: string[] }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts");
+  const ids = cleanIds(input?.contactIds);
+  if (!ids) return { ok: false, error: SELECTION_ERROR };
+  const owned = await ownedContactIds(ctx, ids);
+  if (owned.length === 0) return { ok: false, error: "Those contacts no longer exist." };
+
+  const { error } = await ctx.db.from("contacts").delete().eq("workspace_id", ctx.workspace.id).in("id", owned);
+  if (error) return { ok: false, error: "Couldn’t delete the contacts. Try again." };
+  revalidatePath("/app/contacts");
+  return { ok: true, message: `${plural(owned.length, "contact", "contacts")} deleted.` };
 }

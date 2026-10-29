@@ -29,7 +29,7 @@ export type CampaignRow = {
   /** Numeric click rate (percent) or null, for sorting and charts. */
   clickRateValue: number | null;
 };
-export type ContactRow = { id: string; email: string; name: string; status: ContactStatus; lists: string; added: string };
+export type ContactRow = { id: string; email: string; name: string; status: ContactStatus; lists: { id: string; name: string }[]; added: string };
 export type DomainRow = { id: string; domain: string; status: string; dkimOk: boolean; spfOk: boolean; dmarcOk: boolean; records: { purpose: string; type: string; host: string; value: string; status: string }[] };
 
 const EMPTY_WORKSPACE = { name: "My workspace", plan: "Free", contactsUsed: 0, contactsLimit: 500, sendsUsed: 0, sendsLimit: 2000, dailyLimit: 200 };
@@ -89,21 +89,46 @@ export async function getOverview(ctx: Ctx) {
   };
 }
 
-export async function getContacts(ctx: Ctx, opts: { q?: string; status?: string; page?: number }) {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One page of contacts. `list` is a list id, or "none" for contacts that aren't in any list.
+ * Memberships are loaded in a second query so a contact always shows ALL of its lists, even
+ * when the page is filtered to one of them.
+ */
+export async function getContacts(ctx: Ctx, opts: { q?: string; status?: string; page?: number; list?: string }) {
   const pageSize = 25;
   const page = Math.max(1, opts.page ?? 1);
   if (!ctx.db || !ctx.workspace) return { rows: [] as ContactRow[], total: 0, page, pageSize };
 
-  let q = ctx.db.from("contacts").select("id, email, first_name, last_name, status, created_at, list_members(lists(name))", { count: "exact" }).eq("workspace_id", ctx.workspace.id);
+  const listFilter = opts.list === "none" ? "none" : opts.list && UUID_RE.test(opts.list) ? opts.list : null;
+  const embed = listFilter === "none" ? ", list_members!left(contact_id)" : listFilter ? ", list_members!inner(list_id)" : "";
+
+  let q: any = ctx.db.from("contacts").select(`id, email, first_name, last_name, status, created_at${embed}`, { count: "exact" }).eq("workspace_id", ctx.workspace.id);
+  if (listFilter === "none") q = q.is("list_members", null);
+  else if (listFilter) q = q.eq("list_members.list_id", listFilter);
   // Keep only characters that are safe inside a PostgREST filter expression.
   const term = (opts.q ?? "").replace(/[^\p{L}\p{N}@.+_\- ]/gu, "").trim().slice(0, 80);
   if (term) q = q.or(`email.ilike.%${term}%,first_name.ilike.%${term}%,last_name.ilike.%${term}%`);
   if (opts.status && ["subscribed", "unsubscribed", "bounced", "complained", "cleaned"].includes(opts.status)) q = q.eq("status", opts.status);
   const { data, count } = await q.order("created_at", { ascending: false }).range((page - 1) * pageSize, page * pageSize - 1);
+
+  const ids: string[] = (data ?? []).map((c: any) => c.id);
+  const { data: memberships } = ids.length
+    ? await ctx.db.from("list_members").select("contact_id, lists(id, name)").in("contact_id", ids)
+    : { data: [] as any[] };
+  const listsByContact = new Map<string, { id: string; name: string }[]>();
+  for (const m of (memberships ?? []) as any[]) {
+    if (!m.lists) continue;
+    const arr = listsByContact.get(m.contact_id) ?? [];
+    arr.push({ id: m.lists.id, name: m.lists.name });
+    listsByContact.set(m.contact_id, arr);
+  }
+
   return {
     rows: (data ?? []).map((c: any) => ({
       id: c.id, email: c.email, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || "-", status: c.status,
-      lists: (c.list_members ?? []).map((m: any) => m.lists?.name).filter(Boolean).join(", ") || "-", added: fmt(c.created_at),
+      lists: (listsByContact.get(c.id) ?? []).sort((a, b) => a.name.localeCompare(b.name)), added: fmt(c.created_at),
     })) as ContactRow[],
     total: count ?? 0, page, pageSize,
   };
@@ -113,6 +138,16 @@ export async function getLists(ctx: Ctx) {
   if (!ctx.db || !ctx.workspace) return [] as { id: string; name: string; count: number }[];
   const { data } = await ctx.db.from("lists").select("id, name, list_members(count)").eq("workspace_id", ctx.workspace.id).order("name");
   return (data ?? []).map((l: any) => ({ id: l.id as string, name: l.name as string, count: Number(l.list_members?.[0]?.count ?? 0) }));
+}
+
+/** Lists with member counts, plus the total number of contacts (for the "All contacts" row). */
+export async function getListsOverview(ctx: Ctx) {
+  if (!ctx.db || !ctx.workspace) return { lists: [] as { id: string; name: string; count: number }[], total: 0 };
+  const [lists, { count }] = await Promise.all([
+    getLists(ctx),
+    ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id),
+  ]);
+  return { lists, total: count ?? 0 };
 }
 
 export async function getDomains(ctx: Ctx): Promise<DomainRow[]> {

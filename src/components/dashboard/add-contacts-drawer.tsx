@@ -17,6 +17,7 @@ type Mode = "type" | "paste";
 const MAX_ROWS = 50;
 const MAX_PASTE = 500; // keep in sync with MAX_BATCH in contacts/actions.ts
 const NEW_LIST = "__new__";
+const NO_LIST = "__none__";
 
 const blankRow = (id: number): Row => ({ id, firstName: "", lastName: "", email: "" });
 const isBlank = (r: Row) => !r.email.trim() && !r.firstName.trim() && !r.lastName.trim();
@@ -31,8 +32,12 @@ type Props = {
   lists?: { id: string; name: string }[];
   /** Name used when "A new list" is chosen. Passing it also turns on audience mode. */
   newListName?: string;
-  /** Pre-selected list id; leave empty to default to a new list. */
+  /** Pre-selected list id; leave empty to default to a new list (or to "No list" with `allowNoList`). */
   defaultListId?: string;
+  /** Adds a "No list" choice and makes it the default. For the Contacts page, where a list is optional. */
+  allowNoList?: boolean;
+  /** Replaces the helper text under the "Add to" picker. */
+  listHint?: string;
   title?: string;
   description?: string;
   onAdded?: (result: AddContactsResult) => void;
@@ -43,7 +48,7 @@ type Props = {
  * Closing keeps the draft; Cancel or a successful save clears it. Used on the Contacts page and
  * inside the campaign editor (audience mode).
  */
-export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defaultListId, title = "Add contacts", description, onAdded }: Props) {
+export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defaultListId, allowNoList = false, listHint, title = "Add contacts", description, onAdded }: Props) {
   const uid = useId();
   const formId = `${uid}-form`;
   const nextId = useRef(2);
@@ -54,7 +59,8 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
   const [rows, setRows] = useState<Row[]>(() => [blankRow(1)]);
   const [pasted, setPasted] = useState("");
   const [pasteErrors, setPasteErrors] = useState<{ email: string; message: string }[]>([]);
-  const [target, setTarget] = useState<string>(defaultListId || NEW_LIST);
+  const fallbackTarget = allowNoList ? NO_LIST : NEW_LIST;
+  const [target, setTarget] = useState<string>(defaultListId || fallbackTarget);
   const [consent, setConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [focusRowId, setFocusRowId] = useState<number | null>(null);
@@ -62,7 +68,7 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
 
   // Each time the drawer opens, follow the caller's current choice of list.
   useEffect(() => {
-    if (open) setTarget(defaultListId || NEW_LIST);
+    if (open) setTarget(defaultListId || fallbackTarget);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -136,7 +142,7 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
     }
 
     const contacts = mode === "paste" ? parsed.contacts : rows.map(({ firstName, lastName, email }) => ({ firstName, lastName, email }));
-    const audience = !audienceMode
+    const audience = !audienceMode || target === NO_LIST
       ? undefined
       : target === NEW_LIST
         ? { newListName: newListName?.trim() || "New audience" }
@@ -193,7 +199,8 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
   };
 
   const consentLabel = count > 1 ? "These people agreed to receive emails from me." : "This person agreed to receive emails from me.";
-  const submitLabel = saving ? "Saving…" : audienceMode ? (count > 1 ? `Add ${count} people` : "Add person") : count > 1 ? `Save ${count} contacts` : "Save contact";
+  const withList = audienceMode && target !== NO_LIST;
+  const submitLabel = saving ? "Saving…" : withList ? (count > 1 ? `Add ${count} people` : "Add person") : count > 1 ? `Save ${count} contacts` : "Save contact";
 
   return (
     <Drawer
@@ -252,9 +259,10 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
           </div>
 
           {audienceMode ? (
-            <Field label="Add to" htmlFor={`${uid}-target`} hint="Everyone you add goes into this list, and it becomes the campaign’s audience.">
+            <Field label="Add to" htmlFor={`${uid}-target`} hint={listHint ?? "Everyone you add goes into this list, and it becomes the campaign’s audience."}>
               <Select id={`${uid}-target`} value={target} onChange={(e) => setTarget(e.target.value)}>
-                <option value={NEW_LIST}>A new list{newListName ? `: ${newListName}` : ""}</option>
+                {allowNoList ? <option value={NO_LIST}>No list</option> : null}
+                {!allowNoList || newListName !== undefined ? <option value={NEW_LIST}>A new list{newListName ? `: ${newListName}` : ""}</option> : null}
                 {(lists ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </Select>
             </Field>
@@ -358,8 +366,11 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
   );
 }
 
-/** The Contacts page's "Add contact" button with its own drawer. */
-export function AddContactsButton() {
+/**
+ * The Contacts page's "Add contact" button with its own drawer. The list picker defaults to the list
+ * being viewed (or "No list"), so people can be added straight into a list.
+ */
+export function AddContactsButton({ lists, defaultListId }: { lists: { id: string; name: string }[]; defaultListId?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -367,7 +378,14 @@ export function AddContactsButton() {
         <Plus className="h-4 w-4" aria-hidden="true" />
         Add contact
       </Button>
-      <AddContactsDrawer open={open} onOpenChange={setOpen} />
+      <AddContactsDrawer
+        open={open}
+        onOpenChange={setOpen}
+        lists={lists}
+        defaultListId={defaultListId}
+        allowNoList
+        listHint="Optional. If you pick a list, everyone you add goes into it. Contacts you already have are added to it too."
+      />
     </>
   );
 }

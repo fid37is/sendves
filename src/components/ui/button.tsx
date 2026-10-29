@@ -13,7 +13,7 @@ const variants: Record<Variant, string> = {
   secondary: "bg-brand-50 text-brand-800 hover:bg-brand-100",
   outline: "border border-mist bg-white text-ink hover:border-ink/30 hover:bg-mist-100",
   ghost: "text-ink hover:bg-mist-100",
-  danger: "bg-danger text-white hover:bg-danger/90",
+  danger: "bg-danger text-white shadow-sm hover:bg-danger-strong hover:shadow-lg hover:shadow-danger/25",
   light: "bg-white text-brand-800 shadow-sm hover:bg-brand-50 hover:shadow-lg hover:shadow-night/30",
   outlineLight: "border border-white/30 bg-transparent text-white hover:bg-white/10",
 };
