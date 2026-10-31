@@ -10,55 +10,83 @@ import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
 import { Funnel, TrendChart } from "@/components/charts/trend-chart";
 import { CampaignEditor } from "@/components/dashboard/campaign-editor";
 import { pct } from "@/lib/analytics";
-import { getAudienceOptions, getCampaignDetail, getDomains } from "@/lib/queries";
+import { getAudienceOptions, getCampaignAudienceDetail, getCampaignDetail, getContactFieldKeys, getDepartments, getDomains, getSenderIdentities } from "@/lib/queries";
+import { can } from "@/lib/access";
+import { sanitizeVariables } from "@/lib/email/variables";
+import { NoAccess } from "@/components/dashboard/no-access";
 import { getContext } from "@/lib/workspace";
 import { formatNumber } from "@/lib/utils";
 import type { SearchParams } from "@/types";
 import {
   cancelCampaignAction, deleteCampaignAction, pauseCampaignAction, resumeCampaignAction,
-  audienceOptionsAction, autosaveCampaignAction, previewContactsAction, sendTestAction, submitCampaignAction,
+  autosaveCampaignAction, previewContactsAction, saveCampaignAction, sendTestAction, submitCampaignAction,
 } from "../actions";
+import { audienceSizeAction, importAudienceFileAction, pasteAudienceAction, searchContactsAction } from "../audience-actions";
 import { saveCampaignAsTemplateAction } from "../../templates/actions";
 
 export const metadata: Metadata = { title: "Campaign" };
 
 export default async function CampaignPage({ params }: { params: { id: string }; searchParams: SearchParams }) {
   const ctx = await getContext();
+  if (!can(ctx?.access, "campaigns.view")) return <NoAccess title="Campaign" what="campaigns" />;
+  const access = ctx!.access!;
   const detail = await getCampaignDetail(ctx!, params.id);
   if (!detail || !ctx?.workspace) notFound();
   const { campaign: c, stats, links, series } = detail;
 
   if (c.status === "draft") {
-    const [domains, audience] = await Promise.all([getDomains(ctx), getAudienceOptions(ctx)]);
+    if (!can(access, "campaigns.manage")) {
+      return (
+        <>
+          <PageHeader title={c.name} description="Draft" />
+          <Card><p className="p-6 text-sm text-ink-soft">This campaign is still a draft. Your role can view it but not edit it.</p></Card>
+        </>
+      );
+    }
+    const [domains, audienceOptions, audience, senders, allDepartments, contactFieldKeys] = await Promise.all([
+      getDomains(ctx!), getAudienceOptions(ctx!), getCampaignAudienceDetail(ctx!, c.id), getSenderIdentities(ctx!, ctx!.user.id, c.sender_identity_id), getDepartments(ctx!), getContactFieldKeys(ctx!),
+    ]);
     const toasts: { id: string; kind: ToastKind; message: string }[] = [];
-    if (domains.length === 0) toasts.push({ id: "no-domain", kind: "warning", message: "You haven’t added a sending domain yet. Add and verify one under Sending domains before you send." });
+    if (!domains.some((d) => d.ready)) toasts.push({ id: "no-domain", kind: "warning", message: "No sending domain is ready yet. DKIM, SPF and DMARC must pass under Sending domains before you can send." });
+    else if (senders.length === 0) toasts.push({ id: "no-sender", kind: "warning", message: "You don’t have a work email yet. Set one under Team (the owner can do this for you), then choose it in Send from." });
     return (
       <>
         <PageToasts toasts={toasts} />
         <PageHeader title={c.name} description="Draft. Nothing is sent until you select Send or Schedule." />
         <CampaignEditor
-          campaign={{ id: c.id, name: c.name, subject: c.subject, preview_text: c.preview_text, from_name: c.from_name, from_email: c.from_email, list_id: c.list_id, blocks: c.blocks ?? [] }}
-          domains={domains.map((d) => ({ id: d.id, domain: d.domain, status: d.status }))}
-          lists={audience.lists}
-          totalSubscribed={audience.totalSubscribed}
-          workspace={{ name: ctx.workspace.name, business_address: ctx.workspace.business_address }}
+          campaign={{
+            id: c.id, name: c.name, subject: c.subject, preview_text: c.preview_text,
+            sender_identity_id: c.sender_identity_id ?? null, department_id: c.department_id ?? null,
+            blocks: c.blocks ?? [], variables: sanitizeVariables(c.variables),
+            audience: { mode: audience.mode, listIds: audience.listIds, contacts: audience.contacts },
+          }}
+          senders={senders}
+          departments={allDepartments.filter((d) => access.allDepartments || access.departmentIds.includes(d.id)).map(({ id, name }) => ({ id, name }))}
+          orgWideAllowed={access.allDepartments || access.departmentIds.length === 0}
+          lists={audienceOptions.lists}
+          totalSubscribed={audienceOptions.totalSubscribed}
+          contactFieldKeys={contactFieldKeys}
+          workspace={{ name: ctx!.workspace!.name, business_address: ctx!.workspace!.business_address }}
+          can={{ send: can(access, "campaigns.send"), createContacts: can(access, "contacts.manage"), viewContacts: can(access, "contacts.view"), saveTemplate: can(access, "templates.manage") }}
           actions={{
-            autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, remove: deleteCampaignAction,
-            saveTemplate: saveCampaignAsTemplateAction, previewContacts: previewContactsAction, audienceOptions: audienceOptionsAction,
+            autosave: autosaveCampaignAction, save: saveCampaignAction, test: sendTestAction, submit: submitCampaignAction, remove: deleteCampaignAction,
+            saveTemplate: saveCampaignAsTemplateAction, previewContacts: previewContactsAction, audienceSize: audienceSizeAction,
+            audience: { search: searchContactsAction, paste: pasteAudienceAction, importFile: importAudienceFileAction },
           }}
         />
       </>
     );
   }
 
-  const canPause = c.status === "sending";
-  const canResume = c.status === "paused";
-  const canCancel = ["scheduled", "sending", "paused"].includes(c.status);
+  const mayControl = can(access, "campaigns.send");
+  const canPause = mayControl && c.status === "sending";
+  const canResume = mayControl && c.status === "paused";
+  const canCancel = mayControl && ["scheduled", "sending", "paused"].includes(c.status);
 
   const toasts: { id: string; kind: ToastKind; message: string }[] = [];
   if (c.review_status === "pending") toasts.push({ id: `review-${c.id}`, kind: "info", message: "This campaign is waiting for review. New accounts have their first campaign checked before it sends." });
   if (c.review_status === "rejected") toasts.push({ id: `rejected-${c.id}`, kind: "error", message: "This campaign was not approved. Contact support if you think this is a mistake." });
-  if (c.status === "paused") toasts.push({ id: `paused-${c.id}`, kind: "warning", message: "Sending is paused. If this was automatic, a high bounce or complaint rate triggered it." });
+  if (c.status === "paused") toasts.push({ id: `paused-${c.id}`, kind: "warning", message: c.pause_reason ? `Sending is paused: ${c.pause_reason}` : "Sending is paused. If this was automatic, a high bounce or complaint rate triggered it." });
 
   const maxLinkClicks = Math.max(1, ...links.map((l) => l.clicks));
 
@@ -90,7 +118,7 @@ export default async function CampaignPage({ params }: { params: { id: string };
                 Cancel
               </ConfirmSubmitButton>
             ) : null}
-            {c.status === "cancelled" ? (
+            {c.status === "cancelled" && can(access, "campaigns.manage") ? (
               <ConfirmSubmitButton
                 action={deleteCampaignAction}
                 fields={{ id: c.id }}

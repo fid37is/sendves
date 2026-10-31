@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useRef, type Dispatch, type FocusEvent, type SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
+import { VariableField, type VariableOption } from "@/components/dashboard/variable-field";
 import type { Block } from "@/lib/email/blocks";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -13,7 +14,7 @@ const LABELS: Record<Block["type"], string> = { heading: "Heading", text: "Text"
 function blank(type: Exclude<Block["type"], "html">): Block {
   switch (type) {
     case "heading": return { id: uid(), type, text: "Your headline" };
-    case "text": return { id: uid(), type, text: "Hi {{first_name|there}},\n\nWrite your message here." };
+    case "text": return { id: uid(), type, text: "Hi {{first_name}},\n\nWrite your message here." };
     case "image": return { id: uid(), type, url: "https://", alt: "" };
     case "button": return { id: uid(), type, label: "Learn more", url: "https://" };
     case "divider": return { id: uid(), type };
@@ -21,48 +22,15 @@ function blank(type: Exclude<Block["type"], "html">): Block {
   }
 }
 
-/**
- * Inserts a variable such as {{first_name|there}} at the cursor of the last text field the person
- * used. Mark a field with `data-var="true"` to make it a target. Works for controlled and
- * uncontrolled inputs alike, because it sets the value the way the browser does and fires `input`.
- *
- *   const { onFocusCapture, insert } = useVariableInsert();   // put onFocusCapture on a wrapping element
- */
-export function useVariableInsert() {
-  const last = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
-
-  const onFocusCapture = useCallback((e: FocusEvent<HTMLElement>) => {
-    const el = e.target;
-    if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.dataset.var) last.current = el;
-  }, []);
-
-  /** Returns false when there is no field to insert into yet. */
-  const insert = useCallback((token: string): boolean => {
-    const el = last.current;
-    if (!el || !el.isConnected) return false;
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? start;
-    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, el.value.slice(0, start) + token + el.value.slice(end));
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.focus();
-    const pos = start + token.length;
-    el.setSelectionRange(pos, pos);
-    return true;
-  }, []);
-
-  return { onFocusCapture, insert };
-}
-
 /** The block list with add / move / delete. The parent owns the blocks. */
-export function BlockEditor({ blocks, setBlocks }: { blocks: Block[]; setBlocks: Dispatch<SetStateAction<Block[]>> }) {
+export function BlockEditor({ blocks, setBlocks, variableOptions }: { blocks: Block[]; setBlocks: Dispatch<SetStateAction<Block[]>>; variableOptions: VariableOption[] }) {
   const patch = (id: string, p: Partial<Block>) => setBlocks((bs) => bs.map((b) => (b.id === id ? ({ ...b, ...p } as Block) : b)));
   const move = (i: number, d: -1 | 1) =>
     setBlocks((bs) => { const n = [...bs]; const j = i + d; if (j < 0 || j >= n.length) return bs; [n[i], n[j]] = [n[j], n[i]]; return n; });
 
   return (
     <Card>
-      <CardHeader title="Content" description="Build your email from blocks. Use {{first_name|there}} to personalise." />
+      <CardHeader title="Content" description="Build your email from blocks. Use Insert variable to personalise headings, text and button labels." />
       <div className="space-y-4 p-6">
         {blocks.length === 0 ? <p className="rounded-xl bg-mist-50 p-4 text-sm text-ink-muted">No blocks yet. Add one below.</p> : null}
         {blocks.map((b, i) => (
@@ -75,8 +43,8 @@ export function BlockEditor({ blocks, setBlocks }: { blocks: Block[]; setBlocks:
                 <button type="button" onClick={() => setBlocks((bs) => bs.filter((x) => x.id !== b.id))} className="rounded-full p-1.5 text-danger hover:bg-danger-soft" aria-label="Delete block"><Trash2 className="h-4 w-4" /></button>
               </span>
             </div>
-            {b.type === "heading" ? <Input data-var="true" value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} aria-label="Heading text" /> : null}
-            {b.type === "text" ? <Textarea data-var="true" value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} aria-label="Text" /> : null}
+            {b.type === "heading" ? <VariableField label="Heading text" value={b.text} onChange={(v) => patch(b.id, { text: v })} options={variableOptions} /> : null}
+            {b.type === "text" ? <VariableField label="Text" multiline rows={6} value={b.text} onChange={(v) => patch(b.id, { text: v })} options={variableOptions} /> : null}
             {b.type === "image" ? (
               <div className="space-y-3">
                 <Input value={b.url} onChange={(e) => patch(b.id, { url: e.target.value })} placeholder="https://…/image.jpg" aria-label="Image URL" />
@@ -86,8 +54,11 @@ export function BlockEditor({ blocks, setBlocks }: { blocks: Block[]; setBlocks:
             ) : null}
             {b.type === "button" ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Input data-var="true" value={b.label} onChange={(e) => patch(b.id, { label: e.target.value })} aria-label="Button label" />
-                <Input value={b.url} onChange={(e) => patch(b.id, { url: e.target.value })} placeholder="https://" aria-label="Button link" />
+                <VariableField label="Button label" value={b.label} onChange={(v) => patch(b.id, { label: v })} options={variableOptions} />
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-ink">Button link</label>
+                  <Input value={b.url} onChange={(e) => patch(b.id, { url: e.target.value })} placeholder="https://" aria-label="Button link" />
+                </div>
               </div>
             ) : null}
             {b.type === "spacer" ? <Input type="number" min={4} max={120} value={b.height} onChange={(e) => patch(b.id, { height: Number(e.target.value) })} aria-label="Height in pixels" className="max-w-[140px]" /> : null}

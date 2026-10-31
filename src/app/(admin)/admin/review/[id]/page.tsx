@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireAdminDb } from "@/lib/auth/admin";
@@ -33,7 +33,6 @@ export default async function ReviewCampaignPage({ params }: { params: { id: str
         <div className="mt-6 flex gap-3">
           <form action={approveCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit">Approve</Button></form>
           <form action={rejectCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" variant="danger">Reject</Button></form>
-          <ButtonLink href="/review" variant="outline">Back to queue</ButtonLink>
         </div>
       ) : null}
     </>

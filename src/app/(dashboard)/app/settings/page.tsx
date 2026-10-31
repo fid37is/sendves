@@ -5,6 +5,7 @@ import type { SearchParams } from "@/types";
 import { Field, Input, Select } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { getContext } from "@/lib/workspace";
+import { can, ROLE_LABEL } from "@/lib/access";
 import { updateProfileAction, updateWorkspaceAction } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -12,6 +13,7 @@ export const metadata: Metadata = { title: "Settings" };
 export default async function SettingsPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await getContext();
   const ws = ctx?.workspace;
+  const editWorkspace = can(ctx?.access, "org.settings");
   return (
     <>
       <PageHeader title="Settings" description="Your profile and workspace details." />
@@ -24,6 +26,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Sea
             <Button type="submit">Save profile</Button>
           </form>
         </Card>
+        {editWorkspace ? (
         <Card>
           <CardHeader title="Workspace" description="Appears in the footer of every campaign." />
           <form action={updateWorkspaceAction} className="space-y-5 p-6">
@@ -41,6 +44,15 @@ export default async function SettingsPage({ searchParams }: { searchParams: Sea
             <Button type="submit">Save workspace</Button>
           </form>
         </Card>
+        ) : (
+          <Card>
+            <CardHeader title="Organization" description="Only an owner can change organization settings." />
+            <dl className="space-y-3 p-6 text-sm">
+              <div><dt className="font-semibold text-ink">Business name</dt><dd className="text-ink-soft">{ws?.name}</dd></div>
+              <div><dt className="font-semibold text-ink">Your role</dt><dd className="text-ink-soft">{ctx?.access ? ROLE_LABEL[ctx.access.role] : "-"}</dd></div>
+            </dl>
+          </Card>
+        )}
       </div>
     </>
   );

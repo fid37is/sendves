@@ -1,7 +1,9 @@
 import { parse } from "csv-parse/sync";
 import { checkEmail } from "@/lib/validation/email";
+import { isBuiltInVariable, toVariableKey } from "@/lib/email/variables";
 
-export type ParsedRow = { email: string; first_name: string | null; last_name: string | null };
+/** `custom` holds every other column of the file (company, plan…), keyed so it can be used as {{company}}. */
+export type ParsedRow = { email: string; first_name: string | null; last_name: string | null; custom: Record<string, string> };
 export type ParsedImport = {
   rows: ParsedRow[];
   invalid: number;
@@ -16,6 +18,8 @@ const EMAIL_KEYS = ["email", "e-mail", "email address", "emailaddress", "mail"];
 const FIRST_KEYS = ["first_name", "first name", "firstname", "first", "given name"];
 const LAST_KEYS = ["last_name", "last name", "lastname", "last", "surname", "family name"];
 const NAME_KEYS = ["name", "full name", "fullname"];
+const MAX_CUSTOM_COLUMNS = 20;
+const MAX_CUSTOM_VALUE = 200;
 
 function findKey(headers: string[], candidates: string[]): string | undefined {
   return headers.find((h) => candidates.includes(h.trim().toLowerCase()));
@@ -38,6 +42,18 @@ export function parseContactsCsv(text: string): ParsedImport {
   const firstKey = findKey(headers, FIRST_KEYS);
   const lastKey = findKey(headers, LAST_KEYS);
   const nameKey = findKey(headers, NAME_KEYS);
+
+  // Every other column becomes a custom contact field that emails can use as {{column_name}}.
+  const known = new Set([emailKey, firstKey, lastKey, nameKey].filter(Boolean) as string[]);
+  const customColumns: { header: string; key: string }[] = [];
+  const usedKeys = new Set<string>();
+  for (const h of headers) {
+    if (known.has(h) || customColumns.length >= MAX_CUSTOM_COLUMNS) continue;
+    const key = toVariableKey(h);
+    if (!key || isBuiltInVariable(key) || usedKeys.has(key)) continue;
+    usedKeys.add(key);
+    customColumns.push({ header: h, key });
+  }
 
   const out: ParsedImport = { ...empty };
   const seen = new Set<string>();
@@ -63,7 +79,12 @@ export function parseContactsCsv(text: string): ParsedImport {
       first = f;
       last = rest.join(" ");
     }
-    out.rows.push({ email: check.email, first_name: first || null, last_name: last || null });
+    const custom: Record<string, string> = {};
+    for (const c of customColumns) {
+      const v = (r[c.header] ?? "").trim().slice(0, MAX_CUSTOM_VALUE);
+      if (v) custom[c.key] = v;
+    }
+    out.rows.push({ email: check.email, first_name: first || null, last_name: last || null, custom });
   }
   return out;
 }

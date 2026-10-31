@@ -13,6 +13,12 @@ export const serverEnv = {
   appSecret: process.env.APP_SECRET ?? "",
   cronSecret: process.env.CRON_SECRET ?? "",
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  /**
+   * Optional. The address Sendves itself sends from (team invitations), e.g. "Sendves <no-reply@sendves.com>".
+   * It must be a verified identity in your email provider. Without it, invitations still work: the
+   * invite link is shown on the Team page to copy and share.
+   */
+  platformFrom: process.env.PLATFORM_FROM_EMAIL ?? "",
   sending: {
     provider: (process.env.SENDING_PROVIDER ?? "console") as "console" | "ses",
     ratePerSecond: Math.max(1, Number(process.env.SEND_RATE_PER_SECOND ?? 5)),

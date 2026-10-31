@@ -2,11 +2,12 @@ import { escapeHtml, personalize } from "@/lib/email/blocks";
 import { emailTheme } from "@/config/brand";
 import { serverEnv } from "@/lib/env.server";
 import { clickSig, openSig, unsubscribeToken } from "@/lib/tokens";
+import type { VariableDef } from "@/lib/email/variables";
 import type { OutboundEmail } from "./providers/types";
 
-type CampaignInput = { id: string; subject: string; from_name: string; from_email: string; html: string };
+type CampaignInput = { id: string; subject: string; from_name: string; from_email: string; html: string; variables?: VariableDef[] };
 type WorkspaceInput = { name: string; business_address: string | null; track_opens: boolean };
-type ContactInput = { first_name: string | null; last_name: string | null; email: string };
+type ContactInput = { first_name: string | null; last_name: string | null; email: string; custom_fields?: Record<string, unknown> | null };
 
 function htmlToText(html: string): string {
   return html
@@ -49,7 +50,8 @@ export function buildEmail(args: {
   const unsubUrl = sendId ? `${base}/u/${unsubscribeToken(sendId)}` : `${base}/u/test`;
   const oneClickUrl = sendId ? `${base}/api/unsubscribe?t=${encodeURIComponent(unsubscribeToken(sendId))}` : unsubUrl;
 
-  let html = personalize(campaign.html, contact);
+  const variables = campaign.variables ?? [];
+  let html = personalize(campaign.html, contact, variables);
   if (sendId) html = rewriteLinks(html, sendId);
 
   const footer =
@@ -68,7 +70,7 @@ export function buildEmail(args: {
   return {
     from: fromName ? `"${fromName}" <${campaign.from_email}>` : campaign.from_email,
     to: contact.email,
-    subject: `${args.subjectPrefix ?? ""}${plain(personalize(campaign.subject, contact))}`,
+    subject: `${args.subjectPrefix ?? ""}${plain(personalize(campaign.subject, contact, variables))}`,
     html,
     text: htmlToText(html),
     headers: {

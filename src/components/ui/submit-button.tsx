@@ -19,3 +19,16 @@ export function SubmitButton({
     </Button>
   );
 }
+
+/** A submit button for a form that calls a server action: shows a spinner while it runs. Keeps its label. */
+export function ActionButton({
+  children, variant, size, className,
+}: {
+  children: React.ReactNode;
+  variant?: React.ComponentProps<typeof Button>["variant"];
+  size?: React.ComponentProps<typeof Button>["size"];
+  className?: string;
+}) {
+  const { pending } = useFormStatus();
+  return <Button type="submit" variant={variant} size={size} className={className} loading={pending}>{children}</Button>;
+}

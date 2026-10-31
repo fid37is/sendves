@@ -1,11 +1,11 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import { Trash2 } from "lucide-react";
+import { Copy, Trash2 } from "lucide-react";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { ConfirmIconButton } from "@/components/ui/confirm";
 import { EmailThumb } from "@/components/dashboard/email-preview";
-import { startFromTemplateAction, deleteTemplateAction } from "@/app/(dashboard)/app/templates/actions";
+import { startFromTemplateAction, deleteTemplateAction, duplicateTemplateAction } from "@/app/(dashboard)/app/templates/actions";
 
 function UseButton() {
   const { pending } = useFormStatus();
@@ -20,9 +20,13 @@ type Props = {
   doc: string;
   /** One of your own templates: it can be edited and deleted. */
   own?: boolean;
+  /** May make a campaign from it (campaign permission). */
+  canUse?: boolean;
+  /** May edit, duplicate and delete your own templates (template permission). */
+  canManage?: boolean;
 };
 
-export function TemplateCard({ id, name, description, doc, own = false }: Props) {
+export function TemplateCard({ id, name, description, doc, own = false, canUse = true, canManage = true }: Props) {
   return (
     <div className="overflow-hidden rounded-2xl border border-mist bg-white">
       <EmailThumb doc={doc} title={`${name} preview`} className="h-32" />
@@ -31,13 +35,19 @@ export function TemplateCard({ id, name, description, doc, own = false }: Props)
         <p className="mt-1 text-sm text-ink-muted">{description}</p>
         <div className="mt-4 flex items-center gap-2">
           {/* Creates the draft and opens it in the campaign editor. */}
-          <form action={startFromTemplateAction}>
-            <input type="hidden" name="template" value={id} />
-            <UseButton />
-          </form>
-          {own ? (
+          {canUse ? (
+            <form action={startFromTemplateAction}>
+              <input type="hidden" name="template" value={id} />
+              <UseButton />
+            </form>
+          ) : null}
+          {own && canManage ? (
             <>
               <ButtonLink href={`/app/templates/${id}`} variant="outline" size="sm">Edit</ButtonLink>
+              <form action={duplicateTemplateAction}>
+                <input type="hidden" name="id" value={id} />
+                <Button type="submit" variant="ghost" size="sm" aria-label={`Duplicate ${name}`} title="Duplicate"><Copy className="h-4 w-4" aria-hidden="true" /></Button>
+              </form>
               <span className="ml-auto">
                 <ConfirmIconButton
                   label={`Delete ${name}`}

@@ -3,7 +3,10 @@
  * Dashboard reads use the service-role client filtered by the signed-in user's workspace.
  * Admin reads re-verify the admin role (and 2FA) themselves, so they are safe even if a page forgets to.
  */
-import type { Ctx } from "@/lib/workspace";
+import type { ScopeCtx as Ctx } from "@/lib/workspace";
+import { canAccessDepartment, CAMPAIGN_ROLES, DEFAULT_PERMISSIONS, sanitizePermissions, type CampaignRole, type MemberRole, type Permission } from "@/lib/access";
+import { inScope } from "@/server/scope";
+import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 import { requireAdminDb } from "@/lib/auth/admin";
 import { dnsRecordsFor } from "@/server/sending/domains";
 import { limitsFor } from "@/config/plan-limits";
@@ -32,16 +35,37 @@ export type CampaignRow = {
   clickRateValue: number | null;
 };
 export type ContactRow = { id: string; email: string; name: string; status: ContactStatus; lists: { id: string; name: string }[]; added: string };
-export type DomainRow = { id: string; domain: string; status: string; dkimOk: boolean; spfOk: boolean; dmarcOk: boolean; records: { purpose: string; type: string; host: string; value: string; status: string }[] };
+export type DomainFinding = { status: "ok" | "missing" | "incorrect" | "pending"; message: string; found: string[] };
+export type DomainRow = {
+  id: string; domain: string; status: string; dkimOk: boolean; spfOk: boolean; dmarcOk: boolean;
+  /** Ready to send as: DKIM, SPF and DMARC have all passed. */
+  ready: boolean;
+  lastChecked: string | null;
+  findings: { dkim?: DomainFinding; spf?: DomainFinding; dmarc?: DomainFinding };
+  records: { purpose: string; type: string; host: string; value: string; status: string }[];
+};
 
 const EMPTY_WORKSPACE = { name: "My workspace", plan: "Free", contactsUsed: 0, contactsLimit: 500, sendsUsed: 0, sendsLimit: 2000, dailyLimit: 200 };
 
 // ── Dashboard ─────────────────────────────────────────────────────
 
+/** "All subscribers", a list's name, or "2 lists + 5 contacts". */
+function audienceLabel(r: any): string {
+  if (r.audience_mode !== "custom") return "All subscribers";
+  const lists: string[] = (r.campaign_audience_lists ?? []).map((l: any) => l.lists?.name).filter(Boolean);
+  const contacts = Number(r.campaign_audience_contacts?.[0]?.count ?? 0);
+  const parts: string[] = [];
+  if (lists.length === 1) parts.push(lists[0]);
+  else if (lists.length > 1) parts.push(`${lists.length} lists`);
+  if (contacts > 0) parts.push(`${contacts} ${contacts === 1 ? "contact" : "contacts"}`);
+  return parts.length ? parts.join(" + ") : "No audience yet";
+}
+
 export async function getCampaigns(ctx: Ctx, limit = 200): Promise<CampaignRow[]> {
   if (!ctx.db || !ctx.workspace) return [];
-  const { data: rows } = await ctx.db.from("campaigns").select("id, name, subject, status, review_status, list_id, scheduled_at, completed_at, created_at, lists(name)")
-    .eq("workspace_id", ctx.workspace.id).order("created_at", { ascending: false }).limit(limit);
+  const base = ctx.db.from("campaigns").select("id, name, subject, status, review_status, audience_mode, scheduled_at, completed_at, created_at, department_id, campaign_audience_lists(lists(name)), campaign_audience_contacts(count)")
+    .eq("workspace_id", ctx.workspace.id);
+  const { data: rows } = await inScope(base, ctx.access).order("created_at", { ascending: false }).limit(limit);
   const ids = (rows ?? []).map((r: any) => r.id);
   const { data: stats } = ids.length ? await ctx.db.from("campaign_stats").select("*").in("campaign_id", ids) : { data: [] as any[] };
   const byId = new Map((stats ?? []).map((s: any) => [s.campaign_id, s]));
@@ -51,7 +75,7 @@ export async function getCampaigns(ctx: Ctx, limit = 200): Promise<CampaignRow[]
     const clicks = Number(s?.clicks ?? 0);
     return {
       id: r.id, name: r.name, subject: r.subject || "(no subject)", status: r.status, reviewStatus: r.review_status,
-      audience: r.lists?.name ?? "All subscribers",
+      audience: audienceLabel(r),
       sent, delivered: Number(s?.delivered ?? 0), bounced: Number(s?.bounced ?? 0), unsubscribes: Number(s?.unsubscribes ?? 0),
       clicks, totalClicks: Number(s?.total_clicks ?? clicks),
       clickRate: pct(clicks, sent), clickRateValue: ratio(clicks, sent),
@@ -60,26 +84,36 @@ export async function getCampaigns(ctx: Ctx, limit = 200): Promise<CampaignRow[]
   });
 }
 
-export async function getOverview(ctx: Ctx) {
+export async function getOverview(ctx: Ctx | null) {
   const empty = {
     workspace: EMPTY_WORKSPACE, checklist: [true, false, false, false, false],
     recent: [] as CampaignRow[], series: [] as Awaited<ReturnType<typeof getDailyActivity>>,
     totals: sumDays([]), links: [] as Awaited<ReturnType<typeof getTopLinks>>, avgClickRate: "-",
   };
-  if (!ctx.db || !ctx.workspace) return empty;
+  if (!ctx?.db || !ctx.workspace) return empty;
   const ws = ctx.workspace;
   const db = ctx.db;
   const limits = limitsFor(ws.plan);
 
-  const [{ count: contacts }, { count: sends }, { count: domains }, { count: sentCampaigns }, campaigns, series, links] = await Promise.all([
+  const [{ count: contacts }, { count: sends }, { count: domains }, { count: sentCampaigns }, campaigns, orgSeries, orgLinks] = await Promise.all([
     db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id),
     db.from("sends").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).gte("sent_at", monthStart()),
     db.from("sending_domains").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).eq("status", "verified"),
     db.from("campaigns").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).in("status", ["sending", "sent"]),
     getCampaigns(ctx, 5),
-    getDailyActivity(db, { days: 30, workspaceId: ws.id }),
-    getTopLinks(db, ws.id, { days: 30, limit: 5 }),
+    ctx.access?.allDepartments ? getDailyActivity(db, { days: 30, workspaceId: ws.id }) : Promise.resolve([] as Awaited<ReturnType<typeof getDailyActivity>>),
+    ctx.access?.allDepartments ? getTopLinks(db, ws.id, { days: 30, limit: 5 }) : Promise.resolve([] as Awaited<ReturnType<typeof getTopLinks>>),
   ]);
+
+  // Someone who can't see every department only sees activity of the campaigns they may open.
+  let series = orgSeries;
+  let links = orgLinks;
+  if (!ctx.access?.allDepartments) {
+    const mine = (await getCampaigns(ctx)).filter((c) => c.status === "sent" || c.status === "sending").map((c) => c.id);
+    const scoped = await activityForCampaigns(ctx, mine, 30);
+    series = scoped.series;
+    links = scoped.links.slice(0, 5);
+  }
 
   const totals = sumDays(series);
   return {
@@ -117,11 +151,11 @@ export async function getContacts(ctx: Ctx, opts: { q?: string; status?: string;
 
   const ids: string[] = (data ?? []).map((c: any) => c.id);
   const { data: memberships } = ids.length
-    ? await ctx.db.from("list_members").select("contact_id, lists(id, name)").in("contact_id", ids)
+    ? await ctx.db.from("list_members").select("contact_id, lists(id, name, department_id)").in("contact_id", ids)
     : { data: [] as any[] };
   const listsByContact = new Map<string, { id: string; name: string }[]>();
   for (const m of (memberships ?? []) as any[]) {
-    if (!m.lists) continue;
+    if (!m.lists || !canAccessDepartment(ctx.access, m.lists.department_id)) continue;
     const arr = listsByContact.get(m.contact_id) ?? [];
     arr.push({ id: m.lists.id, name: m.lists.name });
     listsByContact.set(m.contact_id, arr);
@@ -138,7 +172,7 @@ export async function getContacts(ctx: Ctx, opts: { q?: string; status?: string;
 
 export async function getLists(ctx: Ctx) {
   if (!ctx.db || !ctx.workspace) return [] as { id: string; name: string; count: number }[];
-  const { data } = await ctx.db.from("lists").select("id, name, list_members(count)").eq("workspace_id", ctx.workspace.id).order("name");
+  const { data } = await inScope(ctx.db.from("lists").select("id, name, list_members(count)").eq("workspace_id", ctx.workspace.id), ctx.access).order("name");
   return (data ?? []).map((l: any) => ({ id: l.id as string, name: l.name as string, count: Number(l.list_members?.[0]?.count ?? 0) }));
 }
 
@@ -152,7 +186,7 @@ export async function getAudienceOptions(ctx: Ctx): Promise<{ lists: AudienceOpt
   const db = ctx.db;
   const ws = ctx.workspace.id;
   const [{ data: lists }, { count: total }] = await Promise.all([
-    db.from("lists").select("id, name").eq("workspace_id", ws).order("name"),
+    inScope(db.from("lists").select("id, name").eq("workspace_id", ws), ctx.access).order("name"),
     db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ws).eq("status", "subscribed"),
   ]);
   const withCounts = await Promise.all(
@@ -165,25 +199,25 @@ export async function getAudienceOptions(ctx: Ctx): Promise<{ lists: AudienceOpt
   return { lists: withCounts, totalSubscribed: total ?? 0 };
 }
 
-export type TemplateRow = { id: string; name: string; description: string; subject: string; preview_text: string; blocks: Block[]; updated: string };
+export type TemplateRow = { id: string; name: string; description: string; subject: string; preview_text: string; blocks: Block[]; variables: VariableDef[]; departmentId: string | null; updated: string };
+const TEMPLATE_COLUMNS = "id, name, description, subject, preview_text, blocks, variables, department_id, updated_at";
 const toTemplate = (t: any): TemplateRow => ({
   id: t.id, name: t.name, description: t.description ?? "", subject: t.subject ?? "", preview_text: t.preview_text ?? "",
-  blocks: sanitizeBlocks(t.blocks), updated: fmt(t.updated_at),
+  blocks: sanitizeBlocks(t.blocks), variables: sanitizeVariables(t.variables), departmentId: t.department_id ?? null, updated: fmt(t.updated_at),
 });
 
 /** The workspace's own templates, most recently edited first. */
 export async function getTemplates(ctx: Ctx): Promise<TemplateRow[]> {
   if (!ctx.db || !ctx.workspace) return [];
-  const { data } = await ctx.db.from("templates").select("id, name, description, subject, preview_text, blocks, updated_at")
-    .eq("workspace_id", ctx.workspace.id).order("updated_at", { ascending: false }).limit(200);
+  const { data } = await inScope(ctx.db.from("templates").select(TEMPLATE_COLUMNS).eq("workspace_id", ctx.workspace.id), ctx.access)
+    .order("updated_at", { ascending: false }).limit(200);
   return (data ?? []).map(toTemplate);
 }
 
 export async function getTemplate(ctx: Ctx, id: string): Promise<TemplateRow | null> {
   if (!ctx.db || !ctx.workspace || !UUID_RE.test(id)) return null;
-  const { data } = await ctx.db.from("templates").select("id, name, description, subject, preview_text, blocks, updated_at")
-    .eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
-  return data ? toTemplate(data) : null;
+  const { data } = await ctx.db.from("templates").select(TEMPLATE_COLUMNS).eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
+  return data && canAccessDepartment(ctx.access, (data as any).department_id) ? toTemplate(data) : null;
 }
 
 /** Lists with member counts, plus the total number of contacts (for the "All contacts" row). */
@@ -201,6 +235,9 @@ export async function getDomains(ctx: Ctx): Promise<DomainRow[]> {
   const { data } = await ctx.db.from("sending_domains").select("*").eq("workspace_id", ctx.workspace.id).order("created_at");
   return (data ?? []).map((d: any) => ({
     id: d.id, domain: d.domain, status: d.status, dkimOk: d.dkim_ok, spfOk: d.spf_ok, dmarcOk: d.dmarc_ok,
+    ready: d.status === "verified" && d.dkim_ok && d.spf_ok && d.dmarc_ok,
+    lastChecked: d.last_checked_at ?? null,
+    findings: (d.findings && typeof d.findings === "object" ? d.findings : {}) as DomainRow["findings"],
     records: dnsRecordsFor(d.domain, d.dkim_tokens ?? []).map((r) => ({
       ...r, status: (r.purpose === "DKIM" ? d.dkim_ok : r.purpose === "SPF" ? d.spf_ok : d.dmarc_ok) ? "verified" : "pending",
     })),
@@ -210,7 +247,7 @@ export async function getDomains(ctx: Ctx): Promise<DomainRow[]> {
 export async function getCampaignDetail(ctx: Ctx, id: string) {
   if (!ctx.db || !ctx.workspace) return null;
   const { data: c } = await ctx.db.from("campaigns").select("*").eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
-  if (!c) return null;
+  if (!c || !canAccessDepartment(ctx.access, c.department_id)) return null;
   const { data: stats } = await ctx.db.from("campaign_stats").select("*").eq("campaign_id", id).maybeSingle();
 
   const started = c.started_at ? new Date(c.started_at).getTime() : Date.now();
@@ -232,15 +269,217 @@ export async function getCampaignDetail(ctx: Ctx, id: string) {
   };
 }
 
+/**
+ * Sums activity over specific campaigns. Used for people who can't see every department, so their
+ * numbers cover only campaigns they may access (never the organization-wide aggregate).
+ */
+async function activityForCampaigns(ctx: Ctx, campaignIds: string[], days: RangeDays) {
+  const ids = campaignIds.slice(0, 40);
+  const [seriesList, linkList] = await Promise.all([
+    Promise.all(ids.map((id) => getDailyActivity(ctx.db!, { days, workspaceId: ctx.workspace!.id, campaignId: id }))),
+    Promise.all(ids.map((id) => getTopLinks(ctx.db!, ctx.workspace!.id, { campaignId: id, days, limit: 20 }))),
+  ]);
+  const byDate = new Map<string, Awaited<ReturnType<typeof getDailyActivity>>[number]>();
+  for (const series of seriesList) {
+    for (const p of series) {
+      const cur = byDate.get(p.date);
+      if (!cur) { byDate.set(p.date, { ...p }); continue; }
+      cur.sent += p.sent; cur.delivered += p.delivered; cur.bounced += p.bounced; cur.complaints += p.complaints;
+      cur.opens += p.opens; cur.clicks += p.clicks; cur.uniqueClicks += p.uniqueClicks; cur.unsubscribes += p.unsubscribes;
+    }
+  }
+  const byUrl = new Map<string, { url: string; clicks: number; uniqueClicks: number }>();
+  for (const l of linkList.flat()) {
+    const cur = byUrl.get(l.url) ?? { url: l.url, clicks: 0, uniqueClicks: 0 };
+    cur.clicks += l.clicks; cur.uniqueClicks += l.uniqueClicks;
+    byUrl.set(l.url, cur);
+  }
+  return {
+    series: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    links: [...byUrl.values()].sort((a, b) => b.clicks - a.clicks).slice(0, 10),
+  };
+}
+
 export async function getReports(ctx: Ctx, days: RangeDays) {
   const empty = { totals: sumDays([]), series: [] as Awaited<ReturnType<typeof getDailyActivity>>, links: [] as Awaited<ReturnType<typeof getTopLinks>>, campaigns: [] as CampaignRow[] };
   if (!ctx.db || !ctx.workspace) return empty;
-  const [series, links, all] = await Promise.all([
-    getDailyActivity(ctx.db, { days, workspaceId: ctx.workspace.id }),
-    getTopLinks(ctx.db, ctx.workspace.id, { days, limit: 10 }),
-    getCampaigns(ctx),
+  const all = await getCampaigns(ctx); // already limited to the departments this person may see
+  const campaigns = all.filter((c) => c.status === "sent" || c.status === "sending");
+  if (ctx.access?.allDepartments) {
+    const [series, links] = await Promise.all([
+      getDailyActivity(ctx.db, { days, workspaceId: ctx.workspace.id }),
+      getTopLinks(ctx.db, ctx.workspace.id, { days, limit: 10 }),
+    ]);
+    return { totals: sumDays(series), series, links, campaigns };
+  }
+  const { series, links } = await activityForCampaigns(ctx, campaigns.map((c) => c.id), days);
+  return { totals: sumDays(series), series, links, campaigns };
+}
+
+// ── Organization: departments, team, invitations, permissions ─────
+
+export type DepartmentRow = { id: string; name: string; description: string; members: number; resources: number };
+
+export async function getDepartments(ctx: Ctx): Promise<DepartmentRow[]> {
+  if (!ctx.db || !ctx.workspace) return [];
+  const ws = ctx.workspace.id;
+  const [{ data: depts }, { data: links }, { data: campaigns }, { data: lists }, { data: templates }] = await Promise.all([
+    ctx.db.from("departments").select("id, name, description").eq("workspace_id", ws).order("name"),
+    ctx.db.from("department_members").select("department_id").eq("workspace_id", ws),
+    ctx.db.from("campaigns").select("department_id").eq("workspace_id", ws).not("department_id", "is", null),
+    ctx.db.from("lists").select("department_id").eq("workspace_id", ws).not("department_id", "is", null),
+    ctx.db.from("templates").select("department_id").eq("workspace_id", ws).not("department_id", "is", null),
   ]);
-  return { totals: sumDays(series), series, links, campaigns: all.filter((c) => c.status === "sent" || c.status === "sending") };
+  const tally = (rows: any[] | null) => {
+    const m = new Map<string, number>();
+    for (const r of rows ?? []) m.set(r.department_id, (m.get(r.department_id) ?? 0) + 1);
+    return m;
+  };
+  const members = tally(links);
+  const resources = [tally(campaigns), tally(lists), tally(templates)];
+  return (depts ?? []).map((d: any) => ({
+    id: d.id as string, name: d.name as string, description: (d.description as string) ?? "",
+    members: members.get(d.id) ?? 0, resources: resources.reduce((n, m) => n + (m.get(d.id) ?? 0), 0),
+  }));
+}
+
+export type TeamMember = {
+  userId: string; name: string; email: string; role: MemberRole; status: "active" | "deactivated"; departmentIds: string[]; joined: string;
+  /** The person's work email on a verified company domain (jon@domain.com), or null until one is set. */
+  workEmail: string | null; aliasCount: number;
+  /** Where invitations and password-recovery links go. Not a sign-in email and never a sender. */
+  recoveryEmail: string | null;
+};
+
+export async function getTeam(ctx: Ctx): Promise<TeamMember[]> {
+  if (!ctx.db || !ctx.workspace) return [];
+  const ws = ctx.workspace.id;
+  const [{ data: members }, { data: links }, { data: idents }] = await Promise.all([
+    ctx.db.from("workspace_members").select("user_id, role, status, created_at").eq("workspace_id", ws).order("created_at"),
+    ctx.db.from("department_members").select("department_id, user_id").eq("workspace_id", ws),
+    ctx.db.from("sender_identities").select("user_id, kind, email").eq("workspace_id", ws),
+  ]);
+  const work = new Map<string, string>();
+  const aliases = new Map<string, number>();
+  for (const i of (idents ?? []) as any[]) {
+    if (!i.user_id) continue;
+    if (i.kind === "primary") work.set(i.user_id, i.email);
+    else aliases.set(i.user_id, (aliases.get(i.user_id) ?? 0) + 1);
+  }
+  const ids = (members ?? []).map((m: any) => m.user_id as string);
+  const { data: profiles } = ids.length ? await ctx.db.from("profiles").select("id, full_name, email, recovery_email").in("id", ids) : { data: [] as any[] };
+  const byId = new Map((profiles ?? []).map((p: any) => [p.id as string, p]));
+  const depts = new Map<string, string[]>();
+  for (const l of (links ?? []) as any[]) depts.set(l.user_id, [...(depts.get(l.user_id) ?? []), l.department_id]);
+  return (members ?? []).map((m: any) => {
+    const p: any = byId.get(m.user_id);
+    return {
+      userId: m.user_id as string, name: (p?.full_name as string) || "", email: (p?.email as string) || "",
+      role: m.role as MemberRole, status: m.status as "active" | "deactivated", departmentIds: depts.get(m.user_id) ?? [], joined: fmt(m.created_at),
+      workEmail: work.get(m.user_id) ?? null, aliasCount: aliases.get(m.user_id) ?? 0, recoveryEmail: (p?.recovery_email as string) || null,
+    };
+  });
+}
+
+/** `email` is the company email they will sign in with; `contactEmail` is the personal address the invitation was sent to. */
+export type InviteRow = { id: string; email: string; contactEmail: string; fullName: string; role: MemberRole; departmentIds: string[]; expires: string; expired: boolean; invitedBy: string };
+
+export async function getPendingInvites(ctx: Ctx): Promise<InviteRow[]> {
+  if (!ctx.db || !ctx.workspace) return [];
+  const { data } = await ctx.db.from("workspace_invites").select("id, email, contact_email, full_name, role, department_ids, expires_at, invited_by")
+    .eq("workspace_id", ctx.workspace.id).eq("status", "pending").order("created_at", { ascending: false });
+  const inviterIds = [...new Set((data ?? []).map((i: any) => i.invited_by).filter(Boolean))] as string[];
+  const { data: inviters } = inviterIds.length ? await ctx.db.from("profiles").select("id, full_name, email").in("id", inviterIds) : { data: [] as any[] };
+  const who = new Map((inviters ?? []).map((p: any) => [p.id as string, (p.full_name as string) || (p.email as string) || ""]));
+  return (data ?? []).map((i: any) => ({
+    id: i.id as string, email: i.email as string, contactEmail: (i.contact_email as string) ?? "", fullName: (i.full_name as string) ?? "", role: i.role as MemberRole, departmentIds: (i.department_ids ?? []) as string[],
+    expires: fmt(i.expires_at), expired: new Date(i.expires_at).getTime() < Date.now(), invitedBy: (who.get(i.invited_by) as string) ?? "",
+  }));
+}
+
+/** What each configurable role may do in this organization: saved choices, or the defaults. */
+export async function getRolePermissionMap(ctx: Ctx): Promise<Record<CampaignRole, Permission[]>> {
+  const out: Record<string, Permission[]> = {};
+  for (const r of CAMPAIGN_ROLES) out[r] = sanitizePermissions(DEFAULT_PERMISSIONS[r], r);
+  if (ctx.db && ctx.workspace) {
+    const { data } = await ctx.db.from("role_permissions").select("role, permissions").eq("workspace_id", ctx.workspace.id);
+    for (const r of (data ?? []) as any[]) if (r.role in out) out[r.role] = sanitizePermissions(r.permissions, r.role);
+  }
+  return out as Record<CampaignRole, Permission[]>;
+}
+
+// ── Sender identities ─────────────────────────────────────────────
+
+export type SenderRow = {
+  id: string; email: string; localPart: string; fromName: string; status: "active" | "inactive";
+  domainId: string; domain: string; domainReady: boolean;
+  kind: "primary" | "alias"; userId: string | null;
+};
+
+const toSenderRow = (r: any): SenderRow => {
+  const d = r.sending_domains ?? {};
+  return {
+    id: r.id as string, email: r.email as string, localPart: r.local_part as string, fromName: r.from_name as string, status: r.status as "active" | "inactive",
+    domainId: r.domain_id as string, domain: (d.domain as string) ?? "", domainReady: d.status === "verified" && d.dkim_ok === true && d.spf_ok === true && d.dmarc_ok === true,
+    kind: r.kind === "primary" ? "primary" : "alias", userId: (r.user_id as string) ?? null,
+  };
+};
+
+const SENDER_COLUMNS = "id, email, local_part, from_name, status, domain_id, user_id, kind, sending_domains(domain, status, dkim_ok, spf_ok, dmarc_ok)";
+
+/**
+ * What the signed-in person can send as: their own work email first, then their aliases. Nobody sees
+ * anyone else's addresses here. `keepId` adds the address a draft already uses, even if it is someone
+ * else's, so opening a colleague's draft doesn't silently drop its sender.
+ */
+export async function getSenderIdentities(ctx: Ctx, userId: string, keepId?: string | null): Promise<SenderRow[]> {
+  if (!ctx.db || !ctx.workspace) return [];
+  const mine = ctx.db.from("sender_identities").select(SENDER_COLUMNS).eq("workspace_id", ctx.workspace.id).eq("user_id", userId);
+  const { data } = await mine;
+  const rows = (data ?? []) as any[];
+  if (keepId && UUID_RE.test(keepId) && !rows.some((r) => r.id === keepId)) {
+    const { data: extra } = await ctx.db.from("sender_identities").select(SENDER_COLUMNS).eq("workspace_id", ctx.workspace.id).eq("id", keepId).maybeSingle();
+    if (extra) rows.push(extra);
+  }
+  return rows.map(toSenderRow).sort((a, b) => (a.kind === b.kind ? a.email.localeCompare(b.email) : a.kind === "primary" ? -1 : 1));
+}
+
+/** One team member's work email and aliases (for the team details page). */
+export async function getMemberSenders(ctx: Ctx, userId: string): Promise<{ primary: SenderRow | null; aliases: SenderRow[] }> {
+  if (!ctx.db || !ctx.workspace || !UUID_RE.test(userId)) return { primary: null, aliases: [] };
+  const { data } = await ctx.db.from("sender_identities").select(SENDER_COLUMNS).eq("workspace_id", ctx.workspace.id).eq("user_id", userId).order("email");
+  const rows = ((data ?? []) as any[]).map(toSenderRow);
+  return { primary: rows.find((r) => r.kind === "primary") ?? null, aliases: rows.filter((r) => r.kind === "alias") };
+}
+
+/** Custom contact fields in use in this workspace (extra columns of imported files). */
+export async function getContactFieldKeys(ctx: Ctx): Promise<string[]> {
+  if (!ctx.db || !ctx.workspace) return [];
+  const { data } = await ctx.db.rpc("contact_field_keys", { p_workspace: ctx.workspace.id });
+  return Array.isArray(data) ? (data as string[]) : [];
+}
+
+// ── Campaign audience ─────────────────────────────────────────────
+
+export type SelectedContact = { id: string; email: string; name: string };
+export type CampaignAudienceDetail = { mode: "all" | "custom"; listIds: string[]; contacts: SelectedContact[] };
+
+export async function getCampaignAudienceDetail(ctx: Ctx, campaignId: string): Promise<CampaignAudienceDetail> {
+  const empty: CampaignAudienceDetail = { mode: "all", listIds: [], contacts: [] };
+  if (!ctx.db || !ctx.workspace || !UUID_RE.test(campaignId)) return empty;
+  const [{ data: c }, { data: lists }, { data: contacts }] = await Promise.all([
+    ctx.db.from("campaigns").select("audience_mode").eq("id", campaignId).eq("workspace_id", ctx.workspace.id).maybeSingle(),
+    ctx.db.from("campaign_audience_lists").select("list_id").eq("campaign_id", campaignId),
+    ctx.db.from("campaign_audience_contacts").select("contacts(id, email, first_name, last_name, workspace_id)").eq("campaign_id", campaignId).limit(5000),
+  ]);
+  if (!c) return empty;
+  return {
+    mode: (c as any).audience_mode === "custom" ? "custom" : "all",
+    listIds: ((lists ?? []) as any[]).map((l) => l.list_id as string),
+    contacts: ((contacts ?? []) as any[])
+      .map((r) => r.contacts).filter((x: any) => x && x.workspace_id === ctx.workspace!.id)
+      .map((x: any) => ({ id: x.id as string, email: x.email as string, name: [x.first_name, x.last_name].filter(Boolean).join(" ") })),
+  };
 }
 
 // ── Admin (every loader re-checks the admin role) ─────────────────

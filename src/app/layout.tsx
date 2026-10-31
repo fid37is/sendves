@@ -4,7 +4,6 @@ import { siteConfig } from "@/config/site";
 import { Toaster } from "@/components/ui/toast";
 import { ConfirmProvider } from "@/components/ui/confirm";
 import { themeColor } from "@/config/brand";
-// @ts-expect-error CSS side-effect imports are handled by Next.js.
 import "./globals.css";
 
 const sans = Plus_Jakarta_Sans({
@@ -17,6 +16,7 @@ const sans = Plus_Jakarta_Sans({
 /** Headlines and big numbers. A variable font, so every weight is available. */
 const display = Bricolage_Grotesque({
   subsets: ["latin"],
+  weight: ["600", "700", "800"],
   variable: "--font-display",
   display: "swap",
 });

@@ -3,7 +3,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { createPortal, useFormStatus } from "react-dom";
-import { Info, TriangleAlert } from "lucide-react";
+import { Info, Loader2, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -215,7 +215,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
 function PendingButton({ onClick, ...props }: ComponentProps<typeof Button>) {
   const { pending } = useFormStatus();
-  return <Button {...props} onClick={onClick} disabled={pending || props.disabled} />;
+  return <Button {...props} onClick={onClick} loading={pending} />;
 }
 
 /**
@@ -266,7 +266,7 @@ function PendingIconButton({ label, onClick, children }: { label: string; onClic
       onClick={onClick}
       className="rounded-full p-2 text-ink-muted transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 disabled:pointer-events-none disabled:opacity-50"
     >
-      {children}
+      {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : children}
     </button>
   );
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
@@ -35,9 +36,17 @@ export function Button({
   size,
   className,
   type = "button",
+  loading = false,
+  disabled,
+  children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & StyleOptions) {
-  return <button type={type} className={buttonStyles({ variant, size, className })} {...props} />;
+}: ButtonHTMLAttributes<HTMLButtonElement> & StyleOptions & { loading?: boolean }) {
+  return (
+    <button type={type} className={buttonStyles({ variant, size, className })} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
+      {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+      {children}
+    </button>
+  );
 }
 
 export function ButtonLink({
