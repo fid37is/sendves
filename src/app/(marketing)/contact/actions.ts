@@ -29,7 +29,7 @@ export async function contactAction(_prev: FormState, formData: FormData): Promi
   if (!check.ok) return { error: "Enter a valid email address." };
   if (!(topic in TOPICS)) return { error: "Choose a topic." };
   if (message.length < 10) return { error: "Write a little more so we can help." };
-  if (message.length > 5000) return { error: "Keep your message under 5,000 characters." };
+  if (message.length > 5000) return { error: "Message is too long." };
 
   const topicLabel = TOPICS[topic];
   let delivered = false;
@@ -61,5 +61,5 @@ export async function contactAction(_prev: FormState, formData: FormData): Promi
   }
 
   if (!delivered) return { error: `We couldn’t send your message. Please email us at ${env.supportEmail}.` };
-  return { success: "Thanks. We’ve got your message and will reply by email." };
+  return { success: "Message sent." };
 }

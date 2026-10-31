@@ -42,7 +42,7 @@ const config: Config = {
         display: ["var(--font-display)", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       borderRadius: { "4xl": "2rem" },
-      maxWidth: { page: "94rem" },
+      maxWidth: { page: "80rem" },
       /* Keyframes live in globals.css so they are always available to plain CSS too. */
       animation: {
         rise: "rise .8s cubic-bezier(.2,.7,.2,1) both",

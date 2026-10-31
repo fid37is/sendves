@@ -93,7 +93,7 @@ export function AudiencePicker({
         if (mine !== seq.current) return;
         if (res.ok) setFound(res.contacts); else toast.error(res.error);
       } catch {
-        if (mine === seq.current) toast.error("Couldn’t search your contacts. Check your connection and try again.");
+        if (mine === seq.current) toast.error("Search failed.");
       } finally {
         if (mine === seq.current) setSearching(false);
       }
@@ -126,7 +126,7 @@ export function AudiencePicker({
       apply(res);
       if (res.contacts.length > 0) setPasted("");
     } catch {
-      toast.error("Couldn’t add those addresses. Check your connection and try again.");
+      toast.error("Couldn’t add addresses.");
     } finally {
       setBusy(false);
     }
@@ -145,7 +145,7 @@ export function AudiencePicker({
       apply(res);
       if (res.contacts.length > 0 && fileRef.current) fileRef.current.value = "";
     } catch {
-      toast.error("Couldn’t import that file. Check your connection and try again.");
+      toast.error("Import failed.");
     } finally {
       setBusy(false);
     }

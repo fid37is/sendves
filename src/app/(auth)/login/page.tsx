@@ -6,7 +6,7 @@ import { safeNext } from "@/lib/utils";
 export const metadata: Metadata = { title: "Log in", robots: { index: false } };
 
 const notices: Record<string, string> = {
-  "not-configured": "Sign-in isn’t connected yet. Add your Supabase keys and restart the app.",
+  "not-configured": "Sign-in isn’t set up yet.",
   "link-invalid": "That link has expired or was already used. Request a new one and try again.",
 };
 

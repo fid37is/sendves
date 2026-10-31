@@ -32,7 +32,7 @@ export function useDrawerForm(action: (formData: FormData) => Promise<TeamResult
       onSuccess();
       if (res.href) router.push(res.href);
     } catch {
-      toast.error("Couldn’t save. Check your connection and try again.");
+      toast.error("Couldn’t save. Try again.");
     } finally {
       setPending(false);
     }

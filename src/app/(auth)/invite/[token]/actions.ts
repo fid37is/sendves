@@ -16,7 +16,7 @@ import type { FormState } from "@/lib/auth/types";
  * trusts the browser: the email, role and organization all come from the stored invitation.
  */
 export async function acceptInviteAction(token: string, _prev: FormState, formData: FormData): Promise<FormState> {
-  if (!isSupabaseConfigured) return { error: "Sign-in isn’t connected yet. Add your Supabase keys to .env.local and restart the app." };
+  if (!isSupabaseConfigured) return { error: "Sign-in isn’t set up yet." };
   const loaded = await loadInvite(token);
   if (!loaded.ok) return { error: loaded.reason };
   const { invite } = loaded;
@@ -29,19 +29,19 @@ export async function acceptInviteAction(token: string, _prev: FormState, formDa
   let userId: string;
   let password = "";
   if (existing) {
-    if (!existing.recovery_email) return { error: "That company email already belongs to another account. Ask the person who invited you to use a different one." };
+    if (!existing.recovery_email) return { error: "That email is already in use." };
     userId = existing.id as string;
   } else {
     password = String(formData.get("password") ?? "");
     const confirm = String(formData.get("confirmPassword") ?? "");
-    if (password.length < 8) return { error: "Use a password with at least 8 characters." };
+    if (password.length < 8) return { error: "Use 8+ characters." };
     if (password !== confirm) return { error: "The passwords don’t match." };
     const { data: created, error } = await db.auth.admin.createUser({
       email: invite.email, password, email_confirm: true,
       // "invited" keeps the sign-up trigger from also giving them a personal workspace.
       user_metadata: { full_name: invite.full_name, invited: true, terms_accepted_at: new Date().toISOString() },
     });
-    if (error || !created.user) return { error: "Couldn’t create your account. Try again, or ask for a new invitation." };
+    if (error || !created.user) return { error: "Couldn’t create account." };
     userId = created.user.id;
   }
   const undo = async () => { if (!existing) await db.auth.admin.deleteUser(userId).catch(() => null); };
@@ -49,10 +49,10 @@ export async function acceptInviteAction(token: string, _prev: FormState, formDa
   await db.from("profiles").update({ recovery_email: invite.contact_email, full_name: invite.full_name || undefined }).eq("id", userId);
 
   const { data: already } = await db.from("workspace_members").select("status").eq("workspace_id", invite.workspace_id).eq("user_id", userId).maybeSingle();
-  if (already?.status === "deactivated") { await undo(); return { error: "Your access to that organization was deactivated. Ask the owner to reactivate it." }; }
+  if (already?.status === "deactivated") { await undo(); return { error: "Your access was deactivated." }; }
   if (!already) {
     const { error } = await db.from("workspace_members").insert({ workspace_id: invite.workspace_id, user_id: userId, role: invite.role, status: "active", invited_by: invite.invited_by });
-    if (error) { await undo(); return { error: "Couldn’t add you to the organization. Try again." }; }
+    if (error) { await undo(); return { error: "Couldn’t join. Try again." }; }
 
     const ids = (invite.department_ids ?? []) as string[];
     if (ids.length) {

@@ -137,7 +137,7 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
       return;
     }
     if (!consent) {
-      toast.error("Confirm that these people agreed to receive your emails.");
+      toast.error("Confirm consent first.");
       return;
     }
 
@@ -192,7 +192,7 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
       setConsent(false);
       close();
     } catch {
-      toast.error("Couldn’t add the contacts. Check your connection and try again.");
+      toast.error("Couldn’t add contacts.");
     } finally {
       setSaving(false);
     }
