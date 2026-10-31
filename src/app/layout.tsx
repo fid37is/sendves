@@ -1,22 +1,27 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import { siteConfig } from "@/config/site";
 import { Toaster } from "@/components/ui/toast";
 import { ConfirmProvider } from "@/components/ui/confirm";
 import { themeColor } from "@/config/brand";
 import "./globals.css";
 
-const sans = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+/**
+ * Fonts are self-hosted from the @fontsource-variable packages instead of next/font/google.
+ * next/font/google fetches from Google at build time, and Next 14.2 crashes when Google
+ * returns font URLs with no file extension ("Cannot read properties of null (reading '1')").
+ */
+const sans = localFont({
+  src: "../../node_modules/@fontsource-variable/plus-jakarta-sans/files/plus-jakarta-sans-latin-wght-normal.woff2",
+  weight: "200 800",
   variable: "--font-sans",
   display: "swap",
 });
 
 /** Headlines and big numbers. A variable font, so every weight is available. */
-const display = Bricolage_Grotesque({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
+const display = localFont({
+  src: "../../node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2",
+  weight: "200 800",
   variable: "--font-display",
   display: "swap",
 });
