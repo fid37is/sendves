@@ -17,6 +17,7 @@ const sans = Plus_Jakarta_Sans({
 /** Headlines and big numbers. A variable font, so every weight is available. */
 const display = Bricolage_Grotesque({
   subsets: ["latin"],
+  weight: ["600", "700", "800"],
   variable: "--font-display",
   display: "swap",
 });
