@@ -183,7 +183,7 @@ function CopyButton({ value }: { value: string }) {
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("Couldn’t copy the link. Select it and copy manually.");
+      toast.error("Couldn’t copy.");
     }
   };
 
@@ -249,7 +249,7 @@ function ListSettingsDrawer({ list, signupUrl, open, onClose }: { list: ListSumm
       onClose();
       router.push("/app/contacts");
     } catch {
-      toast.error("Couldn’t delete the list. Check your connection and try again.");
+      toast.error("Couldn’t delete the list.");
     } finally {
       setDeleting(false);
     }

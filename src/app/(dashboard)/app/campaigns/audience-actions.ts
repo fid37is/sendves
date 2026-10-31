@@ -13,7 +13,7 @@ const MAX_PASTE_ROWS = 2000;
 /** Signed-in, with a workspace and the given permissions. Returns a message instead of redirecting. */
 async function authorize(...need: Permission[]) {
   const ctx = await getContext();
-  if (!ctx?.workspace || !ctx.db || !ctx.access) return { ok: false as const, error: "Your workspace isn’t available right now. Refresh and try again." };
+  if (!ctx?.workspace || !ctx.db || !ctx.access) return { ok: false as const, error: "Workspace unavailable. Refresh." };
   if (!need.every((p) => can(ctx.access, p))) return { ok: false as const, error: NO_PERMISSION };
   return { ok: true as const, ctx: { db: ctx.db, workspace: ctx.workspace, access: ctx.access } };
 }
@@ -55,7 +55,7 @@ export async function pasteAudienceAction(input: { text: string; consent: boolea
   const parsed = parsePastedContacts(text);
   if (parsed.contacts.length > MAX_PASTE_ROWS) return fail(`Paste up to ${MAX_PASTE_ROWS.toLocaleString("en-US")} addresses at a time. For more, import a file.`);
   const canCreate = can(a.ctx.access, "contacts.manage");
-  if (canCreate && input?.consent !== true) return fail("Confirm that these people agreed to receive your emails.");
+  if (canCreate && input?.consent !== true) return fail("Confirm consent first.");
   return ingestContacts(a.ctx, parsed.contacts.map((c) => ({ email: c.email, firstName: c.firstName, lastName: c.lastName })), {
     canCreate, source: "campaign audience", invalid: parsed.invalidCount, duplicates: parsed.duplicates,
   });
@@ -71,7 +71,7 @@ export async function importAudienceFileAction(formData: FormData): Promise<Inge
   const name = file.name.toLowerCase();
   if (!/\.(csv|txt)$/.test(name) && !/^(text\/csv|text\/plain|application\/vnd\.ms-excel)$/.test(file.type)) return fail("Only .csv and .txt files are supported.");
   const canCreate = can(a.ctx.access, "contacts.manage");
-  if (canCreate && formData.get("consent") !== "on") return fail("Confirm that these people agreed to receive your emails.");
+  if (canCreate && formData.get("consent") !== "on") return fail("Confirm consent first.");
 
   const body = await file.text();
   if (name.endsWith(".txt")) {

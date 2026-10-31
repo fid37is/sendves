@@ -168,7 +168,7 @@ export function CampaignEditor({ campaign, senders, departments, orgWideAllowed,
       const res = await actions.saveTemplate({ name: name.trim(), subject, previewText, blocks, variables: validDefs, departmentId: departmentId || null });
       if (res.ok) toast.success(`Saved “${res.name}” to your templates.`); else toast.error(res.error);
     } catch {
-      toast.error("Couldn’t save the template. Check your connection and try again.");
+      toast.error("Couldn’t save the template.");
     } finally {
       setSavingTpl(false);
     }

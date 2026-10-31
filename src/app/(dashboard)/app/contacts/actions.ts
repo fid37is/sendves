@@ -72,7 +72,7 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
   const fail = (error: string): AddContactsResult => ({ added: 0, error, rowErrors });
 
   if (!input || !Array.isArray(input.contacts)) return fail("Add at least one contact.");
-  if (input.consent !== true) return fail("Confirm that these people agreed to receive your emails.");
+  if (input.consent !== true) return fail("Confirm consent first.");
   if (input.contacts.length > MAX_BATCH) return fail(`Add up to ${MAX_BATCH} contacts at a time. To add more, import a CSV.`);
 
   type Candidate = { index: number; email: string; first_name: string | null; last_name: string | null; role: boolean };
@@ -144,10 +144,10 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
   let list: AddContactsResult["list"];
   if (input.audience) {
     const target = await resolveAudienceList(ctx, input.audience);
-    if (!target) return { added: toInsert.length, error: "The contacts were saved, but we couldn’t put them in a list. Choose a list and try again.", rowErrors };
+    if (!target) return { added: toInsert.length, error: "Saved, but not added to a list.", rowErrors };
     const members = [...insertedIds, ...alreadyThere].map((m) => ({ list_id: target.id, contact_id: m.id }));
     const { error: memberError } = await ctx.db.from("list_members").upsert(members, { onConflict: "list_id,contact_id", ignoreDuplicates: true });
-    if (memberError) return { added: toInsert.length, error: "The contacts were saved, but we couldn’t put them in the list. Try again.", rowErrors };
+    if (memberError) return { added: toInsert.length, error: "Saved, but not added to the list.", rowErrors };
     const { count } = await ctx.db.from("list_members").select("contact_id", { count: "exact", head: true }).eq("list_id", target.id);
     list = { id: target.id, name: target.name, count: count ?? members.length };
     revalidatePath("/app/lists");
@@ -339,7 +339,7 @@ export async function addToListAction(input: { listId: string; contactIds: strin
   if (owned.length === 0) return { ok: false, error: "Those contacts no longer exist." };
 
   const { error } = await ctx.db.from("list_members").upsert(owned.map((contact_id) => ({ list_id: list.id, contact_id })), { onConflict: "list_id,contact_id", ignoreDuplicates: true });
-  if (error) return { ok: false, error: "Couldn’t add the contacts to the list. Try again." };
+  if (error) return { ok: false, error: "Couldn’t add to the list." };
   revalidatePath("/app/contacts");
   return { ok: true, message: `${plural(owned.length, "contact", "contacts")} in “${list.name}”.` };
 }
@@ -350,13 +350,13 @@ export async function moveContactsAction(input: { fromListId: string; toListId: 
   if (!ids) return { ok: false, error: SELECTION_ERROR };
   const [from, to] = await Promise.all([ownedList(ctx, input?.fromListId), ownedList(ctx, input?.toListId)]);
   if (!from || !to) return { ok: false, error: "That list no longer exists." };
-  if (from.id === to.id) return { ok: false, error: "Choose a different list to move them to." };
+  if (from.id === to.id) return { ok: false, error: "Choose a different list." };
   const owned = await ownedContactIds(ctx, ids);
   if (owned.length === 0) return { ok: false, error: "Those contacts no longer exist." };
 
   // Add first, remove second: if anything fails, nobody ends up in no list.
   const { error: addError } = await ctx.db.from("list_members").upsert(owned.map((contact_id) => ({ list_id: to.id, contact_id })), { onConflict: "list_id,contact_id", ignoreDuplicates: true });
-  if (addError) return { ok: false, error: "Couldn’t move the contacts. Try again." };
+  if (addError) return { ok: false, error: "Couldn’t move contacts." };
   const { error: removeError } = await ctx.db.from("list_members").delete().eq("list_id", from.id).in("contact_id", owned);
   revalidatePath("/app/contacts");
   if (removeError) return { ok: false, error: `They were added to “${to.name}”, but couldn’t be removed from “${from.name}”. Remove them from it to finish.` };
@@ -372,7 +372,7 @@ export async function removeFromListAction(input: { listId: string; contactIds: 
   const owned = await ownedContactIds(ctx, ids);
 
   const { error } = await ctx.db.from("list_members").delete().eq("list_id", list.id).in("contact_id", owned);
-  if (error) return { ok: false, error: "Couldn’t remove the contacts from the list. Try again." };
+  if (error) return { ok: false, error: "Couldn’t remove contacts." };
   revalidatePath("/app/contacts");
   return { ok: true, message: `${plural(owned.length, "contact", "contacts")} removed from “${list.name}”. They’re still in your contacts.` };
 }
@@ -386,7 +386,7 @@ export async function deleteContactsAction(input: { contactIds: string[] }): Pro
   if (owned.length === 0) return { ok: false, error: "Those contacts no longer exist." };
 
   const { error } = await ctx.db.from("contacts").delete().eq("workspace_id", ctx.workspace.id).in("id", owned);
-  if (error) return { ok: false, error: "Couldn’t delete the contacts. Try again." };
+  if (error) return { ok: false, error: "Couldn’t delete contacts." };
   revalidatePath("/app/contacts");
   return { ok: true, message: `${plural(owned.length, "contact", "contacts")} deleted.` };
 }
@@ -400,7 +400,7 @@ export async function updateContactNameAction(input: { contactId: string; firstN
   const last = cleanName(input?.lastName);
   const { data, error } = await ctx.db.from("contacts").update({ first_name: first || null, last_name: last || null })
     .eq("id", id).eq("workspace_id", ctx.workspace.id).select("id").maybeSingle();
-  if (error || !data) return { ok: false, error: "Couldn’t save that contact. Try again." };
+  if (error || !data) return { ok: false, error: "Couldn’t save contact." };
   revalidatePath("/app/contacts");
   return { ok: true, message: "Contact updated." };
 }

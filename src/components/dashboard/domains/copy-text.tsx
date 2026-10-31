@@ -14,7 +14,7 @@ export function CopyText({ value, label }: { value: string; label: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("Couldn’t copy. Select the text and copy it by hand.");
+      toast.error("Couldn’t copy.");
     }
   };
   return (

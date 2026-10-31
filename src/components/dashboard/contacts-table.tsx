@@ -139,7 +139,7 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
       setSelected(new Set());
       return true;
     } catch {
-      toast.error("Something went wrong. Check your connection and try again.");
+      toast.error("Something went wrong.");
       return false;
     } finally {
       setBusy(false);

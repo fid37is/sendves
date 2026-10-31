@@ -29,7 +29,7 @@ export function CopyInviteLink({ inviteId }: { inviteId: string }) {
         setManual(res.link);
       }
     } catch {
-      toast.error("Couldn’t get the link. Check your connection and try again.");
+      toast.error("Couldn’t get the link.");
     } finally {
       setBusy(false);
     }

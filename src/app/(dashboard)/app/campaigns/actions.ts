@@ -131,7 +131,7 @@ export async function autosaveCampaignAction(formData: FormData): Promise<Autosa
   const id = text(formData, "id", 60);
   const c = await loadCampaign(ctx, id);
   if (!c) return { ok: false, error: "This campaign no longer exists.", fatal: true };
-  if (c.status !== "draft") return { ok: false, error: "This campaign has already been sent or scheduled, so it can’t be edited.", fatal: true };
+  if (c.status !== "draft") return { ok: false, error: "This campaign can’t be edited.", fatal: true };
 
   const row = await draftRow(ctx, formData, c);
   // The status guard stops a late autosave from touching a campaign that was just scheduled.

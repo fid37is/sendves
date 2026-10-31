@@ -96,7 +96,7 @@ async function persistTemplate(ctx: Ctx, formData: FormData) {
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await ctx.db.from("templates").update(row).eq("id", id).eq("workspace_id", ctx.workspace.id).select("id").maybeSingle();
-  if (error) go(editor(id), "err", "Couldn’t save the template. Try again.");
+  if (error) go(editor(id), "err", "Couldn’t save the template.");
   if (!data) go(BACK, "err", "Template not found.");
   revalidatePath(BACK);
   return { id, name: row.name };
@@ -158,14 +158,14 @@ export type SaveTemplateResult = { ok: true; id: string; name: string } | { ok: 
 export async function saveCampaignAsTemplateAction(input: { name: string; subject: string; previewText: string; blocks: unknown; variables?: unknown; departmentId?: string | null }): Promise<SaveTemplateResult> {
   const ctx = await requireWorkspace("/app/campaigns", ["templates.manage", "campaigns.view"]);
   const blocks = sanitizeBlocks(input?.blocks);
-  if (blocks.length === 0) return { ok: false, error: "Add some content before saving it as a template." };
+  if (blocks.length === 0) return { ok: false, error: "Add content first." };
   if ((await templateCount(ctx)) >= MAX_TEMPLATES) return { ok: false, error: `You can keep up to ${MAX_TEMPLATES} templates. Delete one you no longer use first.` };
   const name = clean(input?.name, 120) || "Untitled template";
   const id = await insertTemplate(ctx, {
     name, subject: clean(input?.subject, 200), preview_text: clean(input?.previewText, 200), blocks,
     variables: sanitizeVariables(input?.variables), department_id: await departmentFor(ctx, input?.departmentId),
   });
-  if (!id) return { ok: false, error: "Couldn’t save the template. Try again." };
+  if (!id) return { ok: false, error: "Couldn’t save the template." };
   revalidatePath(BACK);
   return { ok: true, id, name };
 }

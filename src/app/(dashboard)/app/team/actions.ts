@@ -109,7 +109,7 @@ export async function resendInviteAction(formData: FormData) {
   const ctx = await requireWorkspace(BACK, "members.manage");
   const inv = await loadInvite(ctx, formData);
   if (!inv || inv.status !== "pending") go(BACK, "err", "That invitation is no longer pending.");
-  if (!assignableRoles(ctx.access.role).includes(inv.role)) go(BACK, "err", "You can’t manage invitations for that role.");
+  if (!assignableRoles(ctx.access.role).includes(inv.role)) go(BACK, "err", "Not allowed for that role.");
   await ctx.db.from("workspace_invites").update({ expires_at: new Date(Date.now() + 7 * 86400_000).toISOString() }).eq("id", inv.id);
   const sent = await sendInviteEmail({ inviteId: inv.id, to: inv.contact_email, loginEmail: inv.email, organization: ctx.workspace.name, inviter: ctx.user.fullName || ctx.user.email, role: inv.role });
   revalidatePath(BACK);
@@ -120,7 +120,7 @@ export async function revokeInviteAction(formData: FormData) {
   const ctx = await requireWorkspace(BACK, "members.manage");
   const inv = await loadInvite(ctx, formData);
   if (!inv || inv.status !== "pending") go(BACK, "err", "That invitation is no longer pending.");
-  if (!assignableRoles(ctx.access.role).includes(inv.role)) go(BACK, "err", "You can’t manage invitations for that role.");
+  if (!assignableRoles(ctx.access.role).includes(inv.role)) go(BACK, "err", "Not allowed for that role.");
   await ctx.db.from("workspace_invites").update({ status: "revoked" }).eq("id", inv.id).eq("workspace_id", ctx.workspace.id);
   await recordAudit(ctx.db, actor(ctx), "member.invite_revoked", { type: "invite", id: inv.email }, { workspace_id: ctx.workspace.id });
   revalidatePath(BACK);
@@ -133,7 +133,7 @@ export async function inviteLinkAction(inviteId: string): Promise<{ ok: true; li
   if (!UUID_RE.test(String(inviteId))) return { ok: false, error: "Invitation not found." };
   const { data } = await ctx.db.from("workspace_invites").select("id, status, role").eq("id", inviteId).eq("workspace_id", ctx.workspace.id).maybeSingle();
   if (!data || data.status !== "pending") return { ok: false, error: "That invitation is no longer pending." };
-  if (!assignableRoles(ctx.access.role).includes(data.role as MemberRole)) return { ok: false, error: "You can’t manage invitations for that role." };
+  if (!assignableRoles(ctx.access.role).includes(data.role as MemberRole)) return { ok: false, error: "Not allowed for that role." };
   return { ok: true, link: inviteLink(data.id) };
 }
 

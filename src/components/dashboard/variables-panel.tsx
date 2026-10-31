@@ -30,7 +30,7 @@ function NameEditor({ contact, onSaved }: { contact: PreviewContact; onSaved: (c
       onSaved({ ...contact, first_name: first.trim() || null, last_name: last.trim() || null });
       toast.success("Contact updated.");
     } catch {
-      toast.error("Couldn’t save that contact. Check your connection and try again.");
+      toast.error("Couldn’t save. Try again.");
     } finally {
       setSaving(false);
     }
