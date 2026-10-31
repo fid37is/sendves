@@ -9,6 +9,9 @@ import { switchWorkspaceAction } from "@/app/(dashboard)/app/team/actions";
 import { FlashToast } from "@/components/ui/flash-toast";
 import { AppShell, type ShellNavItem } from "@/components/layout/app-shell";
 
+/** The dashboard is per-user: never pre-render it at build time. */
+export const dynamic = "force-dynamic";
+
 /** `needs` hides a page from people whose role doesn't include it. The pages and actions check again on the server. */
 const nav: (ShellNavItem & { needs?: Permission })[] = [
   { label: "Overview", href: "/app", icon: "home" },

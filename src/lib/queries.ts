@@ -84,13 +84,13 @@ export async function getCampaigns(ctx: Ctx, limit = 200): Promise<CampaignRow[]
   });
 }
 
-export async function getOverview(ctx: Ctx) {
+export async function getOverview(ctx: Ctx | null) {
   const empty = {
     workspace: EMPTY_WORKSPACE, checklist: [true, false, false, false, false],
     recent: [] as CampaignRow[], series: [] as Awaited<ReturnType<typeof getDailyActivity>>,
     totals: sumDays([]), links: [] as Awaited<ReturnType<typeof getTopLinks>>, avgClickRate: "-",
   };
-  if (!ctx.db || !ctx.workspace) return empty;
+  if (!ctx?.db || !ctx.workspace) return empty;
   const ws = ctx.workspace;
   const db = ctx.db;
   const limits = limitsFor(ws.plan);
