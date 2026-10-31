@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { Check, Copy, FolderPlus, Settings2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { cn } from "@/lib/utils";
@@ -20,19 +20,25 @@ const focusFirstInput = (panel: HTMLElement) => panel.querySelector<HTMLInputEle
 
 // ── New list ────────────────────────────────────────────────────────
 
-function NewListDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+type DepartmentOption = { id: string; name: string };
+
+function NewListDrawer({ open, onClose, departments = [], orgWideAllowed = true }: { open: boolean; onClose: () => void; departments?: DepartmentOption[]; orgWideAllowed?: boolean }) {
   const router = useRouter();
   const uid = useId();
   const formId = `${uid}-form`;
   const [name, setName] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
       setName("");
+      setDepartmentId(orgWideAllowed ? "" : departments[0]?.id ?? "");
       setError(undefined);
     }
+    // Resets only when the drawer opens; the department options don't change while it is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const submit = async (e: React.FormEvent) => {
@@ -41,7 +47,7 @@ function NewListDrawer({ open, onClose }: { open: boolean; onClose: () => void }
     if (!name.trim()) return setError("Give the list a name.");
     setSaving(true);
     try {
-      const res = await createListAction({ name });
+      const res = await createListAction({ name, departmentId: departmentId || undefined });
       if (!res.ok) return setError(res.error ?? "Couldn’t create the list.");
       toast.success(res.message ?? "List created.");
       onClose();
@@ -83,6 +89,16 @@ function NewListDrawer({ open, onClose }: { open: boolean; onClose: () => void }
             onChange={(e) => { setName(e.target.value); setError(undefined); }}
           />
         </Field>
+        {departments.length > 0 ? (
+          <div className="mt-5">
+            <Field label="Department" htmlFor={`${uid}-dept`} hint="Who can see and use this list.">
+              <Select id={`${uid}-dept`} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+                {orgWideAllowed ? <option value="">Whole organization</option> : null}
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+        ) : null}
       </form>
     </Drawer>
   );
@@ -97,10 +113,16 @@ type RailProps = {
   currentId: string | null;
   /** True while viewing contacts that are not in any list. */
   unassigned: boolean;
+  /** Departments the person may put a new list in. Empty hides the choice. */
+  departments?: DepartmentOption[];
+  /** Whether a list can be organization-wide (people limited to their departments can't, once they have one). */
+  orgWideAllowed?: boolean;
+  /** Hides "New list" for people who can only view contacts. */
+  canCreate?: boolean;
 };
 
 /** Switches the Contacts page between All contacts, "Not in a list" and each list. */
-export function ListsRail({ lists, total, currentId, unassigned }: RailProps) {
+export function ListsRail({ lists, total, currentId, unassigned, departments, orgWideAllowed, canCreate = true }: RailProps) {
   const [creating, setCreating] = useState(false);
   const all = !currentId && !unassigned;
 
@@ -116,10 +138,12 @@ export function ListsRail({ lists, total, currentId, unassigned }: RailProps) {
       <Card className="h-fit">
         <div className="flex items-center justify-between gap-3 border-b border-mist px-4 py-3">
           <h2 className="text-sm font-bold text-ink">Lists</h2>
-          <Button size="sm" variant="secondary" onClick={() => setCreating(true)} aria-haspopup="dialog">
-            <FolderPlus className="h-4 w-4" aria-hidden="true" />
-            New list
-          </Button>
+          {canCreate ? (
+            <Button size="sm" variant="secondary" onClick={() => setCreating(true)} aria-haspopup="dialog">
+              <FolderPlus className="h-4 w-4" aria-hidden="true" />
+              New list
+            </Button>
+          ) : null}
         </div>
         <nav aria-label="Contact lists" className="flex gap-1 overflow-x-auto p-2 lg:flex-col lg:overflow-visible">
           <Link href="/app/contacts" aria-current={all ? "page" : undefined} className={item(all)}>

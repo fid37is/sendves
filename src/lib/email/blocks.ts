@@ -3,6 +3,7 @@
  * editor preview (browser) and the sending engine (server) produce identical HTML.
  */
 import { emailTheme } from "@/config/brand";
+import { defsMap, recipientValues, resolveVariable, VARIABLE_TOKEN_RE, type RecipientData, type VariableDef } from "@/lib/email/variables";
 
 export type Block =
   | { id: string; type: "heading"; text: string }
@@ -77,10 +78,16 @@ export function renderBlocks(blocks: Block[], opts: { preview?: string } = {}): 
     `<!--FOOTER--></td></tr></table></body></html>`;
 }
 
-/** Replaces {{first_name|fallback}}, {{last_name}} and {{email}}. Values are HTML-escaped. */
-export function personalize(html: string, vars: { first_name?: string | null; last_name?: string | null; email?: string | null }): string {
-  return html.replace(/\{\{\s*(first_name|last_name|email)\s*(?:\|\s*([^}]*?))?\s*\}\}/g, (_m, key: string, fallback?: string) => {
-    const value = (vars as Record<string, string | null | undefined>)[key];
-    return escapeHtml((value && value.trim()) || (fallback ?? "").trim());
-  });
+/**
+ * Replaces every {{variable}} and {{variable|fallback}} with the recipient's value, the campaign's
+ * value or a fallback (see lib/email/variables.ts for the exact order). Values are HTML-escaped.
+ */
+export function personalize(html: string, recipient: RecipientData, defs: VariableDef[] = []): string {
+  const values = recipientValues(recipient);
+  const byKey = defsMap(defs);
+  // A fallback written inside already-escaped HTML is escaped too; undo that so it isn't escaped twice.
+  const unescape = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+  return html.replace(new RegExp(VARIABLE_TOKEN_RE.source, "g"), (_m, key: string, inline?: string) =>
+    escapeHtml(resolveVariable(key.toLowerCase(), inline === undefined ? undefined : unescape(inline), values, byKey)),
+  );
 }

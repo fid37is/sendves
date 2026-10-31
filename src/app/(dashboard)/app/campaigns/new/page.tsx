@@ -7,12 +7,15 @@ import { PageHeader } from "@/components/ui/page-header";
 import { starterTemplates } from "@/config/starter-templates";
 import { getTemplates } from "@/lib/queries";
 import { getContext } from "@/lib/workspace";
+import { can } from "@/lib/access";
+import { NoAccess } from "@/components/dashboard/no-access";
 import { createCampaignAction } from "../actions";
 
 export const metadata: Metadata = { title: "New campaign" };
 
 export default async function NewCampaignPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await getContext();
+  if (!can(ctx?.access, "campaigns.manage")) return <NoAccess title="New campaign" what="creating campaigns" />;
   const mine = ctx ? await getTemplates(ctx) : [];
   const options = [
     ...starterTemplates.map((t) => ({ id: t.id, name: t.name, description: t.description })),

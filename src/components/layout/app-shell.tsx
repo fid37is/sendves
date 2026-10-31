@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity, BarChart3, Ban, Building2, ClipboardCheck, CreditCard, Flag, Globe, History, Home, LayoutTemplate, LogOut, Menu,
-  PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldCheck, Users, X, type LucideIcon,
+  AtSign, PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldCheck, Users, UsersRound, X, type LucideIcon,
 } from "lucide-react";
 import { Logo, LogoMark } from "@/components/ui/logo";
 import { BackContext } from "@/components/layout/back-button";
@@ -15,7 +15,7 @@ import { cn, initials } from "@/lib/utils";
 const icons: Record<string, LucideIcon> = {
   home: Home, send: Send, users: Users, template: LayoutTemplate, globe: Globe, chart: BarChart3, card: CreditCard,
   settings: Settings, shield: ShieldCheck, flag: Flag, ban: Ban, building: Building2, review: ClipboardCheck,
-  activity: Activity, history: History,
+  activity: Activity, history: History, team: UsersRound, at: AtSign,
 };
 
 export type ShellNavItem = { label: string; href: string; icon: keyof typeof icons };
@@ -30,6 +30,9 @@ export function AppShell({
   children,
   switchLink,
   defaultCollapsed = false,
+  organizations,
+  activeOrganizationId,
+  switchOrganization,
 }: {
   nav: ShellNavItem[];
   area: "app" | "admin";
@@ -39,6 +42,10 @@ export function AppShell({
   switchLink?: { label: string; href: string };
   /** Read from a cookie on the server, so the sidebar renders in the right state with no flash. */
   defaultCollapsed?: boolean;
+  /** Shown as a switcher when the person belongs to more than one organization. */
+  organizations?: { id: string; name: string }[];
+  activeOrganizationId?: string;
+  switchOrganization?: (formData: FormData) => Promise<void>;
 }) {
   const rawPath = usePathname();
   const [open, setOpen] = useState(false);
@@ -161,6 +168,20 @@ export function AppShell({
         </nav>
 
         <div className={cn("border-t p-4", admin ? "border-white/10" : "border-mist", compact && "px-2")}>
+          {organizations && organizations.length > 1 && switchOrganization && !compact ? (
+            <form action={switchOrganization} className="mb-3">
+              <label htmlFor={`org-${compact ? "c" : "f"}`} className={cn("mb-1 block px-1 text-xs font-semibold", admin ? "text-white/60" : "text-ink-muted")}>Organization</label>
+              <select
+                id={`org-${compact ? "c" : "f"}`}
+                name="workspaceId"
+                defaultValue={activeOrganizationId}
+                onChange={(e) => e.currentTarget.form?.requestSubmit()}
+                className="h-10 w-full rounded-xl border border-mist bg-white px-3 text-sm font-semibold text-ink focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              >
+                {organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </form>
+          ) : null}
           {switchLink && !compact ? (
             <a
               href={switchLink.href}

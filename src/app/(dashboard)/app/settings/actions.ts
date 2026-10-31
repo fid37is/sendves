@@ -1,4 +1,3 @@
-// src/app/(dashboard)/app/settings/actions.ts
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -23,7 +22,7 @@ export async function updateProfileAction(formData: FormData) {
 }
 
 export async function updateWorkspaceAction(formData: FormData) {
-  const ctx = await requireWorkspace(BACK);
+  const ctx = await requireWorkspace(BACK, "org.settings");
   const name = text(formData, "business", 80);
   const address = text(formData, "address", 300);
   const tz = String(formData.get("tz") ?? "");

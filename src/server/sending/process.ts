@@ -1,6 +1,8 @@
 import { createAdminClient, type Db } from "@/lib/supabase/admin";
 import { serverEnv } from "@/lib/env.server";
+import { sanitizeVariables } from "@/lib/email/variables";
 import { evaluateHealth, loadSettings, maybeRaiseLimit } from "@/server/abuse";
+import { checkSender, type SenderCheck } from "@/server/senders";
 import { getProvider, PermanentSendError, type MailProvider } from "./providers";
 import { buildEmail } from "./render";
 
@@ -12,6 +14,8 @@ type Caches = {
   campaigns: Map<string, Row | null>;
   workspaces: Map<string, Row | null>;
   sentToday: Map<string, number>;
+  /** Whether each campaign's sender is still allowed to send, checked once per pass. */
+  senders: Map<string, SenderCheck>;
 };
 
 function startOfUtcDay(): Date {
@@ -48,7 +52,7 @@ async function setSend(db: Db, id: string, patch: Row) {
 
 async function processSend(db: Db, provider: MailProvider, send: Row, caches: Caches): Promise<"sent" | "failed" | "other"> {
   const campaign = await cached(caches.campaigns, send.campaign_id, async () =>
-    (await db.from("campaigns").select("id, subject, from_name, from_email, html, status").eq("id", send.campaign_id).maybeSingle()).data);
+    (await db.from("campaigns").select("id, subject, from_name, from_email, html, status, variables, sender_identity_id").eq("id", send.campaign_id).maybeSingle()).data);
   const ws = await cached(caches.workspaces, send.workspace_id, async () =>
     (await db.from("workspaces").select("id, name, business_address, track_opens, daily_send_limit, status").eq("id", send.workspace_id).maybeSingle()).data);
 
@@ -57,7 +61,17 @@ async function processSend(db: Db, provider: MailProvider, send: Row, caches: Ca
     return "other";
   }
 
-  const { data: contact } = await db.from("contacts").select("id, email, first_name, last_name, status").eq("id", send.contact_id).maybeSingle();
+  // The sender must still be allowed to send: an active identity on a domain that passes DKIM, SPF
+  // and DMARC. If not (deactivated, domain removed or failing), the campaign pauses with a reason
+  // and nothing is lost: the send goes back in the queue.
+  const sender = await cached(caches.senders, campaign.id, () => checkSender(db, ws.id, campaign.sender_identity_id));
+  if (!sender.ok) {
+    await db.from("campaigns").update({ status: "paused", pause_reason: sender.reason }).eq("id", campaign.id).eq("status", "sending");
+    await setSend(db, send.id, { status: "queued", attempts: Math.max(0, send.attempts - 1) });
+    return "other";
+  }
+
+  const { data: contact } = await db.from("contacts").select("id, email, first_name, last_name, status, custom_fields").eq("id", send.contact_id).maybeSingle();
   if (!contact || contact.status !== "subscribed") {
     await setSend(db, send.id, { status: "skipped" });
     return "other";
@@ -81,7 +95,11 @@ async function processSend(db: Db, provider: MailProvider, send: Row, caches: Ca
   }
 
   try {
-    const email = buildEmail({ campaign: campaign as any, workspace: ws as any, contact: contact as any, sendId: send.id });
+    // The identity is the authority for the From address, whatever the campaign row says.
+    const email = buildEmail({
+      campaign: { ...(campaign as any), from_email: sender.identity.email, from_name: sender.identity.from_name, variables: sanitizeVariables(campaign.variables) },
+      workspace: ws as any, contact: contact as any, sendId: send.id,
+    });
     const { messageId } = await provider.send(email);
     await setSend(db, send.id, { status: "sent", provider_message_id: messageId, sent_at: new Date().toISOString(), last_error: null });
     caches.sentToday.set(ws.id, sentToday + 1);
@@ -120,7 +138,7 @@ export async function runTick(opts: { budgetMs?: number } = {}): Promise<{ activ
   await db.rpc("release_stuck_sends");
   const activated = await activateScheduled(db);
 
-  const caches: Caches = { campaigns: new Map(), workspaces: new Map(), sentToday: new Map() };
+  const caches: Caches = { campaigns: new Map(), workspaces: new Map(), sentToday: new Map(), senders: new Map() };
   const delay = 1000 / serverEnv.sending.ratePerSecond;
   let sent = 0;
   let failed = 0;

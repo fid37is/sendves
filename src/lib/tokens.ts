@@ -31,3 +31,14 @@ export const openSig = (sendId: string) => sign(`o:${sendId}`);
 export const clickSig = (sendId: string, url: string) => sign(`c:${sendId}:${url}`);
 export const verifyOpenSig = (sendId: string, sig: string) => safeEqual(sig, openSig(sendId));
 export const verifyClickSig = (sendId: string, url: string, sig: string) => safeEqual(sig, clickSig(sendId, url));
+
+/** Invitation token: "<inviteId>.<signature>". Signed, so the link can be re-created without storing a secret. */
+export function inviteToken(inviteId: string): string {
+  return `${inviteId}.${sign(`i:${inviteId}`)}`;
+}
+
+export function parseInviteToken(token: string): string | null {
+  const [inviteId, sig] = String(token ?? "").split(".");
+  if (!inviteId || !sig) return null;
+  return safeEqual(sig, sign(`i:${inviteId}`)) ? inviteId : null;
+}

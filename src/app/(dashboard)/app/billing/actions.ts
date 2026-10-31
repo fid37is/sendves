@@ -1,4 +1,3 @@
-// src/app/(dashboard)/app/billing/actions.ts
 "use server";
 
 import { redirect } from "next/navigation";
@@ -9,7 +8,7 @@ import { billingEnabled, createCheckout, type PaidPlan, type Provider } from "@/
 const BACK = "/app/billing";
 
 export async function startCheckoutAction(formData: FormData) {
-  const ctx = await requireWorkspace(BACK);
+  const ctx = await requireWorkspace(BACK, "billing.manage");
   const plan = String(formData.get("plan") ?? "");
   const provider = String(formData.get("provider") ?? "");
 

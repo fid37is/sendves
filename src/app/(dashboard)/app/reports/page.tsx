@@ -7,6 +7,8 @@ import { BarList, Funnel, RangeTabs, TrendChart } from "@/components/charts/tren
 import { parseRange, pct } from "@/lib/analytics";
 import { getReports } from "@/lib/queries";
 import { getContext } from "@/lib/workspace";
+import { can } from "@/lib/access";
+import { NoAccess } from "@/components/dashboard/no-access";
 import { formatNumber } from "@/lib/utils";
 import type { SearchParams } from "@/types";
 
@@ -15,6 +17,7 @@ export const metadata: Metadata = { title: "Reports" };
 export default async function ReportsPage({ searchParams }: { searchParams: SearchParams }) {
   const days = parseRange(searchParams.range);
   const ctx = await getContext();
+  if (!can(ctx?.access, "reports.view")) return <NoAccess title="Reports" what="reports" />;
   const { totals: t, series, links, campaigns } = await getReports(ctx!, days);
   const ranked = [...campaigns].filter((c) => c.clickRateValue !== null).sort((a, b) => (b.clickRateValue ?? 0) - (a.clickRateValue ?? 0)).slice(0, 6);
 
@@ -79,7 +82,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
           </div>
         </Card>
         <Card>
-          <CardHeader title="Top clicked links" description={`Last ${days} days, across all campaigns`} />
+          <CardHeader title="Top clicked links" description={`Last ${days} days, across ${ctx?.access?.allDepartments ? "all campaigns" : "the campaigns you can access"}`} />
           <BarList
             empty="No clicks recorded in this period."
             items={links.map((l) => ({ label: l.url.replace(/^https?:\/\//, ""), title: l.url, value: l.clicks, sub: `${formatNumber(l.uniqueClicks)} unique` }))}

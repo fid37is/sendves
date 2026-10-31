@@ -1,4 +1,3 @@
-// src/app/(dashboard)/app/contacts/page.tsx
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -9,7 +8,9 @@ import type { SearchParams } from "@/types";
 import { Input, Select } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { siteConfig } from "@/config/site";
-import { getContacts, getListsOverview } from "@/lib/queries";
+import { getContacts, getDepartments, getListsOverview } from "@/lib/queries";
+import { can } from "@/lib/access";
+import { NoAccess } from "@/components/dashboard/no-access";
 import { getContext } from "@/lib/workspace";
 import { AddContactsButton } from "@/components/dashboard/add-contacts-drawer";
 import { ContactsTable } from "@/components/dashboard/contacts-table";
@@ -19,6 +20,11 @@ export const metadata: Metadata = { title: "Contacts" };
 
 export default async function ContactsPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await getContext();
+  if (!can(ctx?.access, "contacts.view")) return <NoAccess title="Contacts" what="contacts" />;
+  const manage = can(ctx?.access, "contacts.manage");
+  const access = ctx!.access!;
+  const departments = (await getDepartments(ctx!)).filter((d) => access.allDepartments || access.departmentIds.includes(d.id)).map(({ id, name }) => ({ id, name }));
+  const orgWideAllowed = access.allDepartments || access.departmentIds.length === 0;
   const page = Number(searchParams.page ?? 1) || 1;
 
   const { lists, total: totalContacts } = await getListsOverview(ctx!);
@@ -58,16 +64,20 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
             <a href={`/api/contacts/export${current ? `?list=${current.id}` : ""}`} className={buttonStyles({ variant: "outline" })}>
               <Download className="h-4 w-4" aria-hidden="true" />Export{current ? " list" : ""}
             </a>
-            <ButtonLink href={`/app/contacts/import${current ? `?list=${current.id}` : ""}`} variant="outline">
-              <Upload className="h-4 w-4" aria-hidden="true" />Import CSV
-            </ButtonLink>
-            <AddContactsButton lists={lists.map(({ id, name }) => ({ id, name }))} defaultListId={current?.id} />
+            {manage ? (
+              <>
+                <ButtonLink href={`/app/contacts/import${current ? `?list=${current.id}` : ""}`} variant="outline">
+                  <Upload className="h-4 w-4" aria-hidden="true" />Import CSV
+                </ButtonLink>
+                <AddContactsButton lists={lists.map(({ id, name }) => ({ id, name }))} defaultListId={current?.id} />
+              </>
+            ) : null}
           </div>
         }
       />
 
       <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
-        <ListsRail lists={lists} total={totalContacts} currentId={current?.id ?? null} unassigned={unassigned} />
+        <ListsRail lists={lists} total={totalContacts} currentId={current?.id ?? null} unassigned={unassigned} departments={departments} orgWideAllowed={orgWideAllowed} canCreate={manage} />
 
         <div className="min-w-0 space-y-4">
           {current ? <ListHeader list={current} signupUrl={`${siteConfig.url}/subscribe/${current.id}`} /> : null}

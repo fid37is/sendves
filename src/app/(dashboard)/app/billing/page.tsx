@@ -7,6 +7,8 @@ import { PageToasts } from "@/components/ui/toast";
 import { plans } from "@/config/plans";
 import { getOverview } from "@/lib/queries";
 import { getContext } from "@/lib/workspace";
+import { can } from "@/lib/access";
+import { NoAccess } from "@/components/dashboard/no-access";
 import { formatNumber } from "@/lib/utils";
 import { billingEnabled } from "@/server/billing";
 import { startCheckoutAction } from "./actions";
@@ -27,6 +29,7 @@ function Meter({ label, used, limit }: { label: string; used: number; limit: num
 
 export default async function BillingPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await getContext();
+  if (!can(ctx?.access, "billing.manage")) return <NoAccess title="Billing" what="billing" />;
   const { workspace } = await getOverview(ctx!);
   const providers = ([billingEnabled.stripe() && "stripe", billingEnabled.paystack() && "paystack"].filter(Boolean)) as ("stripe" | "paystack")[];
   const current = (ctx?.workspace?.plan ?? "free").toLowerCase();

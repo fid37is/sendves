@@ -10,12 +10,16 @@ import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
 import { getCampaigns } from "@/lib/queries";
 import { deleteCampaignAction } from "./actions";
 import { getContext } from "@/lib/workspace";
+import { can } from "@/lib/access";
+import { NoAccess } from "@/components/dashboard/no-access";
 import { formatNumber } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Campaigns" };
 
 export default async function CampaignsPage() {
   const ctx = await getContext();
+  if (!can(ctx?.access, "campaigns.view")) return <NoAccess title="Campaigns" what="campaigns" />;
+  const manage = can(ctx?.access, "campaigns.manage");
   const campaigns = await getCampaigns(ctx!);
 
   return (
@@ -24,10 +28,12 @@ export default async function CampaignsPage() {
         title="Campaigns"
         description="Create, schedule and review your email campaigns."
         action={
-          <ButtonLink href="/app/campaigns/new">
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            New campaign
-          </ButtonLink>
+          manage ? (
+            <ButtonLink href="/app/campaigns/new">
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              New campaign
+            </ButtonLink>
+          ) : undefined
         }
       />
       <Card>
@@ -49,7 +55,7 @@ export default async function CampaignsPage() {
                 <TD>{c.date}</TD>
                 <TD className="text-right">
                   {/* Only drafts and cancelled campaigns can be deleted; anything that has sent keeps its results. */}
-                  {c.status === "draft" || c.status === "cancelled" ? (
+                  {manage && (c.status === "draft" || c.status === "cancelled") ? (
                     <ConfirmIconButton
                       label={`Delete ${c.name}`}
                       action={deleteCampaignAction}

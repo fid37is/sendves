@@ -1,8 +1,8 @@
-// src/app/(dashboard)/app/contacts/actions.ts
 "use server";
 
 import { revalidatePath } from "next/cache";
 import { limitsFor } from "@/config/plan-limits";
+import { canAccessDepartment, canAssignDepartment, type Access } from "@/lib/access";
 import { go } from "@/lib/flash";
 import { requireWorkspace } from "@/lib/workspace";
 import { checkEmail } from "@/lib/validation/email";
@@ -40,16 +40,25 @@ export type AddContactsResult = {
 
 const MAX_BATCH = 500;
 
+/**
+ * Department for a list created without an explicit choice: organization-wide for people who can see
+ * every department, otherwise their own (first) department so they can still see what they create.
+ */
+function defaultDepartment(access: Access): string | null {
+  return access.allDepartments ? null : access.departmentIds[0] ?? null;
+}
+
 /** Finds the requested list, or creates one (adding " (2)", " (3)"… if the name is taken). */
 async function resolveAudienceList(ctx: Awaited<ReturnType<typeof requireWorkspace>>, audience: NonNullable<AddContactsInput["audience"]>) {
   if ("listId" in audience) {
-    const { data } = await ctx.db.from("lists").select("id, name").eq("id", String(audience.listId)).eq("workspace_id", ctx.workspace.id).maybeSingle();
-    return data as { id: string; name: string } | null;
+    const { data } = await ctx.db.from("lists").select("id, name, department_id").eq("id", String(audience.listId)).eq("workspace_id", ctx.workspace.id).maybeSingle();
+    const row = data as { id: string; name: string; department_id: string | null } | null;
+    return row && canAccessDepartment(ctx.access, row.department_id) ? { id: row.id, name: row.name } : null;
   }
   const base = String(audience.newListName ?? "").trim().slice(0, 70) || "New audience";
   for (let n = 1; n <= 20; n++) {
     const name = n === 1 ? base : `${base} (${n})`;
-    const { data, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name }).select("id, name").single();
+    const { data, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name, department_id: defaultDepartment(ctx.access) }).select("id, name").single();
     if (!error && data) return data as { id: string; name: string };
     if (error?.code !== "23505") return null;
   }
@@ -58,7 +67,7 @@ async function resolveAudienceList(ctx: Awaited<ReturnType<typeof requireWorkspa
 
 /** Adds one or several contacts in a single save. Problem rows are reported back; the rest are saved. */
 export async function addContactsAction(input: AddContactsInput): Promise<AddContactsResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const rowErrors: AddContactsResult["rowErrors"] = [];
   const fail = (error: string): AddContactsResult => ({ added: 0, error, rowErrors });
 
@@ -156,7 +165,7 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
 
 export async function importContactsAction(formData: FormData) {
   const back = "/app/contacts/import";
-  const ctx = await requireWorkspace(back);
+  const ctx = await requireWorkspace(back, "contacts.manage");
 
   if (formData.get("consent") !== "on") go(back, "err", "Confirm that your contacts gave you permission to email them.");
   const file = formData.get("file");
@@ -176,17 +185,17 @@ export async function importContactsAction(formData: FormData) {
   let listId = String(formData.get("listId") ?? "");
   if (listId) {
     const { data: own } = UUID_RE.test(listId)
-      ? await ctx.db.from("lists").select("id").eq("id", listId).eq("workspace_id", ctx.workspace.id).maybeSingle()
+      ? await ctx.db.from("lists").select("id, department_id").eq("id", listId).eq("workspace_id", ctx.workspace.id).maybeSingle()
       : { data: null };
-    if (!own) go(back, "err", "That list no longer exists. Choose another list.");
+    if (!own || !canAccessDepartment(ctx.access, (own as { department_id: string | null }).department_id)) go(back, "err", "That list no longer exists. Choose another list.");
     listId = own?.id ?? "";
   }
   const newList = String(formData.get("newList") ?? "").trim();
   if (newList) {
-    const { data: l, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name: newList.slice(0, 80) }).select("id").single();
+    const { data: l, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name: newList.slice(0, 80), department_id: defaultDepartment(ctx.access) }).select("id, department_id").single();
     if (error) {
-      const { data: existing } = await ctx.db.from("lists").select("id").eq("workspace_id", ctx.workspace.id).eq("name", newList).maybeSingle();
-      listId = existing?.id ?? "";
+      const { data: existing } = await ctx.db.from("lists").select("id, department_id").eq("workspace_id", ctx.workspace.id).eq("name", newList).maybeSingle();
+      listId = existing && canAccessDepartment(ctx.access, existing.department_id) ? existing.id : "";
     } else listId = l.id;
   }
 
@@ -202,7 +211,7 @@ export async function importContactsAction(formData: FormData) {
 
     const now = new Date().toISOString();
     const { data: inserted } = await ctx.db.from("contacts")
-      .upsert(chunk.map((r) => ({ workspace_id: ctx.workspace.id, ...r, source: "csv import", consented_at: now })), { onConflict: "workspace_id,email", ignoreDuplicates: true })
+      .upsert(chunk.map((r) => ({ workspace_id: ctx.workspace.id, email: r.email, first_name: r.first_name, last_name: r.last_name, custom_fields: r.custom, source: "csv import", consented_at: now })), { onConflict: "workspace_id,email", ignoreDuplicates: true })
       .select("id");
     added += inserted?.length ?? 0;
 
@@ -244,8 +253,10 @@ function cleanIds(v: unknown): string[] | null {
 async function ownedList(ctx: Ws, id: unknown) {
   const listId = String(id ?? "");
   if (!UUID_RE.test(listId)) return null;
-  const { data } = await ctx.db.from("lists").select("id, name").eq("id", listId).eq("workspace_id", ctx.workspace.id).maybeSingle();
-  return (data as { id: string; name: string } | null) ?? null;
+  const { data } = await ctx.db.from("lists").select("id, name, department_id").eq("id", listId).eq("workspace_id", ctx.workspace.id).maybeSingle();
+  const row = data as { id: string; name: string; department_id: string | null } | null;
+  // A list that belongs to another department behaves as if it doesn't exist.
+  return row && canAccessDepartment(ctx.access, row.department_id) ? { id: row.id, name: row.name } : null;
 }
 
 /** Only ids of contacts that belong to this workspace survive. */
@@ -257,18 +268,31 @@ async function ownedContactIds(ctx: Ws, ids: string[]) {
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 const SELECTION_ERROR = `Select between 1 and ${MAX_SELECTION} contacts.`;
 
-export async function createListAction(input: { name: string }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+export async function createListAction(input: { name: string; departmentId?: string }): Promise<ListActionResult> {
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const name = cleanName(input?.name);
   if (!name) return { ok: false, error: "Give the list a name." };
-  const { data, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name }).select("id").single();
+  let departmentId = defaultDepartment(ctx.access);
+  if (input?.departmentId !== undefined) {
+    const wanted = String(input.departmentId || "");
+    if (wanted && !UUID_RE.test(wanted)) return { ok: false, error: "Choose a valid department." };
+    if (wanted) {
+      const { data: dept } = await ctx.db.from("departments").select("id").eq("id", wanted).eq("workspace_id", ctx.workspace.id).maybeSingle();
+      if (!dept || !canAssignDepartment(ctx.access, wanted)) return { ok: false, error: "Choose a department you belong to." };
+      departmentId = wanted;
+    } else {
+      if (!canAssignDepartment(ctx.access, null)) return { ok: false, error: "Choose a department you belong to." };
+      departmentId = null;
+    }
+  }
+  const { data, error } = await ctx.db.from("lists").insert({ workspace_id: ctx.workspace.id, name, department_id: departmentId }).select("id").single();
   if (error || !data) return { ok: false, error: error?.code === "23505" ? "You already have a list with that name." : "Couldn’t create the list." };
   revalidatePath("/app/contacts");
   return { ok: true, id: data.id, message: `List “${name}” created.` };
 }
 
 export async function renameListAction(input: { listId: string; name: string }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const list = await ownedList(ctx, input?.listId);
   if (!list) return { ok: false, error: "That list no longer exists." };
   const name = cleanName(input?.name);
@@ -282,16 +306,17 @@ export async function renameListAction(input: { listId: string; name: string }):
 
 /**
  * Deletes a list (the contacts stay). Blocked while an unfinished campaign still targets it:
- * deleting would clear that campaign's audience, and a campaign with no audience goes to everyone.
+ * deleting would shrink that campaign's audience.
  */
 export async function deleteListAction(input: { listId: string }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const list = await ownedList(ctx, input?.listId);
   if (!list) return { ok: false, error: "That list no longer exists." };
 
-  const { count } = await ctx.db.from("campaigns").select("id", { count: "exact", head: true })
-    .eq("workspace_id", ctx.workspace.id).eq("list_id", list.id).in("status", ["draft", "scheduled", "sending", "paused"]);
-  if (count && count > 0) {
+  const { data: using } = await ctx.db.from("campaign_audience_lists").select("campaign_id, campaigns!inner(status, workspace_id)")
+    .eq("list_id", list.id).eq("campaigns.workspace_id", ctx.workspace.id).in("campaigns.status", ["draft", "scheduled", "sending", "paused"]);
+  const count = (using ?? []).length;
+  if (count > 0) {
     return { ok: false, error: `“${list.name}” is the audience of ${plural(count, "campaign", "campaigns")} that haven’t finished sending. Change their audience or delete them first.` };
   }
 
@@ -305,7 +330,7 @@ export async function deleteListAction(input: { listId: string }): Promise<ListA
 // ── Contacts inside lists ───────────────────────────────────────────
 
 export async function addToListAction(input: { listId: string; contactIds: string[] }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const ids = cleanIds(input?.contactIds);
   if (!ids) return { ok: false, error: SELECTION_ERROR };
   const list = await ownedList(ctx, input?.listId);
@@ -320,7 +345,7 @@ export async function addToListAction(input: { listId: string; contactIds: strin
 }
 
 export async function moveContactsAction(input: { fromListId: string; toListId: string; contactIds: string[] }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const ids = cleanIds(input?.contactIds);
   if (!ids) return { ok: false, error: SELECTION_ERROR };
   const [from, to] = await Promise.all([ownedList(ctx, input?.fromListId), ownedList(ctx, input?.toListId)]);
@@ -339,7 +364,7 @@ export async function moveContactsAction(input: { fromListId: string; toListId: 
 }
 
 export async function removeFromListAction(input: { listId: string; contactIds: string[] }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const ids = cleanIds(input?.contactIds);
   if (!ids) return { ok: false, error: SELECTION_ERROR };
   const list = await ownedList(ctx, input?.listId);
@@ -354,7 +379,7 @@ export async function removeFromListAction(input: { listId: string; contactIds: 
 
 /** Permanently deletes contacts. Unsubscribes stay on the suppression list, so they can’t be emailed again. */
 export async function deleteContactsAction(input: { contactIds: string[] }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const ids = cleanIds(input?.contactIds);
   if (!ids) return { ok: false, error: SELECTION_ERROR };
   const owned = await ownedContactIds(ctx, ids);
@@ -368,7 +393,7 @@ export async function deleteContactsAction(input: { contactIds: string[] }): Pro
 
 /** Sets the names used by {{first_name}} and {{last_name}} for one contact. */
 export async function updateContactNameAction(input: { contactId: string; firstName: string; lastName: string }): Promise<ListActionResult> {
-  const ctx = await requireWorkspace("/app/contacts");
+  const ctx = await requireWorkspace("/app/contacts", "contacts.manage");
   const id = String(input?.contactId ?? "");
   if (!UUID_RE.test(id)) return { ok: false, error: "Contact not found." };
   const first = cleanName(input?.firstName);

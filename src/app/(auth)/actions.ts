@@ -5,6 +5,8 @@ import { env, isSupabaseConfigured } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { safeNext } from "@/lib/utils";
 import type { FormState } from "@/lib/auth/types";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { sendRecoveryEmail } from "@/server/team";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NOT_CONFIGURED = "Sign-in isn’t connected yet. Add your Supabase keys to .env.local and restart the app.";
@@ -58,16 +60,43 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   redirect(next);
 }
 
-/** Sends a recovery link. Always returns the same message so accounts can’t be guessed. */
+/**
+ * Sends a recovery link. Always returns the same message so accounts can’t be guessed.
+ *
+ * People invited by an organization sign in with a company email that may have no mailbox Sendves can
+ * reach, so their link goes to the recovery (personal) email on their account. Everyone else gets the
+ * standard link at the email they registered with.
+ */
 export async function forgotPasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const email = text(formData, "email").toLowerCase();
   if (!EMAIL_RE.test(email)) return { error: "Enter a valid email address." };
   if (!isSupabaseConfigured) return { error: NOT_CONFIGURED };
 
+  const generic: FormState = { success: "If an account exists for that email, a recovery link is on its way to the recovery email on the account." };
+
+  let recoveryEmail: string | null = null;
+  try {
+    const { data: profile } = await createAdminClient().from("profiles").select("recovery_email").eq("email", email).maybeSingle();
+    recoveryEmail = (profile?.recovery_email as string | null) || null;
+  } catch { /* no service key: fall back to the standard flow below */ }
+
+  if (recoveryEmail) {
+    try {
+      const { data, error } = await createAdminClient().auth.admin.generateLink({ type: "recovery", email });
+      const hashed = data?.properties?.hashed_token;
+      if (!error && hashed) {
+        const link = `${env.siteUrl}/auth/callback?token_hash=${encodeURIComponent(hashed)}&type=recovery&next=/reset-password`;
+        await sendRecoveryEmail({ to: recoveryEmail, loginEmail: email, link });
+      }
+    } catch (err) {
+      console.error("[auth] recovery link failed:", (err as Error).message);
+    }
+    return generic;
+  }
+
   const supabase = createClient();
   await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${env.siteUrl}/auth/callback?next=/reset-password` });
-
-  return { success: "If an account exists for that email, a recovery link is on its way. Check your inbox." };
+  return generic;
 }
 
 export async function resetPasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
