@@ -39,7 +39,7 @@ export default async function DomainsPage(_props: { searchParams: SearchParams }
           </thead>
           <tbody>
             {domains.length === 0 ? (
-              <EmptyRow cols={5} message={manage ? "No sending domains yet. Use Add domain to start." : "No sending domains yet. An owner or administrator can add one."} />
+              <EmptyRow cols={5} message={manage ? "No sending domains yet. Use Add domain to start." : "No sending domains yet. An owner can add one."} />
             ) : domains.map((d) => (
               <tr key={d.id} className="transition-colors hover:bg-mist-50/60">
                 <TD><Link href={`/app/domains/${d.id}`} className="font-semibold text-ink hover:underline">{d.domain}</Link></TD>

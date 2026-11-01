@@ -10,6 +10,14 @@ const STATELESS_API = /^\/api\/(track|webhooks|cron|unsubscribe|health)(\/|$)/;
 
 const hostOnly = (h: string | null) => (h ?? "").split(":")[0].toLowerCase();
 const ADMIN_HOSTNAME = hostOnly(env.adminHost);
+const ADMIN_PREFIX = (process.env.NEXT_PUBLIC_ADMIN_SUBDOMAIN ?? "admin").toLowerCase();
+
+/**
+ * True when the request is for the admin console's host. In production that is exactly admin.<root domain>.
+ * While developing, admin.localhost always counts too, so a production domain left in .env.local
+ * cannot make the console fall through to the customer app. Never applies in production.
+ */
+const isAdminHost = (host: string) => host === ADMIN_HOSTNAME || (process.env.NODE_ENV !== "production" && host === `${ADMIN_PREFIX}.localhost`);
 
 function notFound(request: NextRequest) {
   // A path that matches no route renders the standard 404 page.
@@ -82,7 +90,7 @@ async function adminHost(request: NextRequest) {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (hostOnly(request.headers.get("host")) === ADMIN_HOSTNAME) return adminHost(request);
+  if (isAdminHost(hostOnly(request.headers.get("host")))) return adminHost(request);
 
   // On every other host the admin console does not exist.
   if (pathname === "/admin" || pathname.startsWith("/admin/")) return notFound(request);

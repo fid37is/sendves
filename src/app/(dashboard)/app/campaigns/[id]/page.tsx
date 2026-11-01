@@ -10,19 +10,21 @@ import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
 import { Funnel, TrendChart } from "@/components/charts/trend-chart";
 import { CampaignEditor } from "@/components/dashboard/campaign-editor";
 import { pct } from "@/lib/analytics";
-import { getAudienceOptions, getCampaignAudienceDetail, getCampaignDetail, getContactFieldKeys, getDepartments, getDomains, getSenderIdentities } from "@/lib/queries";
+import { getAudienceOptions, getCampaignAudienceDetail, getCampaignDetail, getContactFieldKeys, getDomains, getSenderIdentities } from "@/lib/queries";
 import { can } from "@/lib/access";
+import { designFromRow } from "@/lib/email/campaign";
+import { sanitizeBlocks } from "@/lib/email/sanitize";
 import { sanitizeVariables } from "@/lib/email/variables";
+import { assetRule, getEmailLogo } from "@/server/email-assets";
 import { NoAccess } from "@/components/dashboard/no-access";
 import { getContext } from "@/lib/workspace";
 import { formatNumber } from "@/lib/utils";
 import type { SearchParams } from "@/types";
 import {
   cancelCampaignAction, deleteCampaignAction, pauseCampaignAction, resumeCampaignAction,
-  autosaveCampaignAction, previewContactsAction, saveCampaignAction, sendTestAction, submitCampaignAction,
+  autosaveCampaignAction, previewContactsAction, sendTestAction, submitCampaignAction,
 } from "../actions";
-import { audienceSizeAction, importAudienceFileAction, pasteAudienceAction, searchContactsAction } from "../audience-actions";
-import { saveCampaignAsTemplateAction } from "../../templates/actions";
+import { audienceSizeAction, pasteAudienceAction } from "../audience-actions";
 
 export const metadata: Metadata = { title: "Campaign" };
 
@@ -43,36 +45,33 @@ export default async function CampaignPage({ params }: { params: { id: string };
         </>
       );
     }
-    const [domains, audienceOptions, audience, senders, allDepartments, contactFieldKeys] = await Promise.all([
-      getDomains(ctx!), getAudienceOptions(ctx!), getCampaignAudienceDetail(ctx!, c.id), getSenderIdentities(ctx!, ctx!.user.id, c.sender_identity_id), getDepartments(ctx!), getContactFieldKeys(ctx!),
+    const [domains, audienceOptions, audience, senders, contactFieldKeys, logo] = await Promise.all([
+      getDomains(ctx!), getAudienceOptions(ctx!), getCampaignAudienceDetail(ctx!, c.id), getSenderIdentities(ctx!, ctx!.user.id, c.sender_identity_id), getContactFieldKeys(ctx!),
+      getEmailLogo(ctx!.db!, ctx!.workspace!.id),
     ]);
     const toasts: { id: string; kind: ToastKind; message: string }[] = [];
     if (!domains.some((d) => d.ready)) toasts.push({ id: "no-domain", kind: "warning", message: "No sending domain is ready yet. DKIM, SPF and DMARC must pass under Sending domains before you can send." });
-    else if (senders.length === 0) toasts.push({ id: "no-sender", kind: "warning", message: "You don’t have a work email yet. Set one under Team (the owner can do this for you), then choose it in Send from." });
+    else if (senders.length === 0) toasts.push({ id: "no-sender", kind: "warning", message: "You don’t have a work email yet. Set one under Team (the owner can do this for you), then choose it as the sender." });
     return (
       <>
         <PageToasts toasts={toasts} />
-        <PageHeader title={c.name} description="Draft. Nothing is sent until you select Send or Schedule." />
         <CampaignEditor
           campaign={{
-            id: c.id, name: c.name, subject: c.subject, preview_text: c.preview_text,
-            sender_identity_id: c.sender_identity_id ?? null, department_id: c.department_id ?? null,
-            blocks: c.blocks ?? [], variables: sanitizeVariables(c.variables),
+            id: c.id, name: c.name, subject: c.subject, preheader: c.preview_text,
+            senderId: c.sender_identity_id ?? "",
+            design: designFromRow(c.design, sanitizeBlocks(c.blocks), assetRule(ctx!.workspace!.id)),
+            variables: sanitizeVariables(c.variables),
             audience: { mode: audience.mode, listIds: audience.listIds, contacts: audience.contacts },
           }}
+          logo={logo}
           senders={senders}
-          departments={allDepartments.filter((d) => access.allDepartments || access.departmentIds.includes(d.id)).map(({ id, name }) => ({ id, name }))}
-          orgWideAllowed={access.allDepartments || access.departmentIds.length === 0}
           lists={audienceOptions.lists}
           totalSubscribed={audienceOptions.totalSubscribed}
           contactFieldKeys={contactFieldKeys}
-          workspace={{ name: ctx!.workspace!.name, business_address: ctx!.workspace!.business_address }}
-          can={{ send: can(access, "campaigns.send"), createContacts: can(access, "contacts.manage"), viewContacts: can(access, "contacts.view"), saveTemplate: can(access, "templates.manage") }}
-          actions={{
-            autosave: autosaveCampaignAction, save: saveCampaignAction, test: sendTestAction, submit: submitCampaignAction, remove: deleteCampaignAction,
-            saveTemplate: saveCampaignAsTemplateAction, previewContacts: previewContactsAction, audienceSize: audienceSizeAction,
-            audience: { search: searchContactsAction, paste: pasteAudienceAction, importFile: importAudienceFileAction },
-          }}
+          workspace={{ name: ctx!.workspace!.name, business_address: ctx!.workspace!.business_address, timezone: ctx!.workspace!.timezone || "UTC" }}
+          canSend={can(access, "campaigns.send")}
+          canAddContacts={can(access, "contacts.manage")}
+          actions={{ autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, previewContacts: previewContactsAction, audienceSize: audienceSizeAction, pasteAudience: pasteAudienceAction }}
         />
       </>
     );

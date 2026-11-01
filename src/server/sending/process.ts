@@ -54,7 +54,7 @@ async function processSend(db: Db, provider: MailProvider, send: Row, caches: Ca
   const campaign = await cached(caches.campaigns, send.campaign_id, async () =>
     (await db.from("campaigns").select("id, subject, from_name, from_email, html, status, variables, sender_identity_id").eq("id", send.campaign_id).maybeSingle()).data);
   const ws = await cached(caches.workspaces, send.workspace_id, async () =>
-    (await db.from("workspaces").select("id, name, business_address, track_opens, daily_send_limit, status").eq("id", send.workspace_id).maybeSingle()).data);
+    (await db.from("workspaces").select("id, name, business_address, track_opens, daily_send_limit, status, timezone").eq("id", send.workspace_id).maybeSingle()).data);
 
   if (!campaign || !ws || campaign.status === "cancelled" || ws.status === "suspended") {
     await setSend(db, send.id, { status: "skipped" });

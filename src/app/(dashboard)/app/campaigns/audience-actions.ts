@@ -2,13 +2,12 @@
 
 import { can, NO_PERMISSION, type Permission } from "@/lib/access";
 import { getContext } from "@/lib/workspace";
-import { parsePastedContacts } from "@/lib/validation/paste-contacts";
+import { MAX_PASTED_RECIPIENTS, parsePastedContacts } from "@/lib/validation/paste-contacts";
 import { audienceSize, ingestContacts, parseSelection, type IngestResult } from "@/server/audience";
 import { parseContactsCsv } from "@/server/imports";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_PASTE_CHARS = 200_000;
-const MAX_PASTE_ROWS = 2000;
 
 /** Signed-in, with a workspace and the given permissions. Returns a message instead of redirecting. */
 async function authorize(...need: Permission[]) {
@@ -53,7 +52,7 @@ export async function pasteAudienceAction(input: { text: string; consent: boolea
   const text = String(input?.text ?? "").slice(0, MAX_PASTE_CHARS);
   if (!text.trim()) return fail("Paste at least one email address.");
   const parsed = parsePastedContacts(text);
-  if (parsed.contacts.length > MAX_PASTE_ROWS) return fail(`Paste up to ${MAX_PASTE_ROWS.toLocaleString("en-US")} addresses at a time. For more, import a file.`);
+  if (parsed.contacts.length > MAX_PASTED_RECIPIENTS) return fail(`Paste up to ${MAX_PASTED_RECIPIENTS.toLocaleString("en-US")} addresses at a time. For more, import a file into a list on the Contacts page and choose that list.`);
   const canCreate = can(a.ctx.access, "contacts.manage");
   if (canCreate && input?.consent !== true) return fail("Confirm consent first.");
   return ingestContacts(a.ctx, parsed.contacts.map((c) => ({ email: c.email, firstName: c.firstName, lastName: c.lastName })), {

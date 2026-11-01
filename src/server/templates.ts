@@ -1,6 +1,8 @@
 import "server-only";
 import { starterTemplates } from "@/config/starter-templates";
-import { cloneBlocks, renderBlocks, type Block } from "@/lib/email/blocks";
+import { cloneBlocks, type Block } from "@/lib/email/blocks";
+import { designFromLegacyBlocks, designFromStarter, renderCampaignHtml } from "@/lib/email/campaign";
+import { getEmailLogo } from "@/server/email-assets";
 import { sanitizeBlocks } from "@/lib/email/sanitize";
 import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 import { canAccessDepartment, type Access } from "@/lib/access";
@@ -25,16 +27,21 @@ export async function resolveTemplate(db: Db, workspaceId: string, id: string, a
   return { id: t.id, name: t.name, description: t.description ?? "", subject: t.subject ?? "", preview_text: t.preview_text ?? "", blocks: cloneBlocks(sanitizeBlocks(t.blocks)), variables: sanitizeVariables(t.variables), departmentId: t.department_id ?? null };
 }
 
-type Owner = { db: Db; workspace: { id: string; name: string }; user: { id: string } };
+type Owner = { db: Db; workspace: { id: string; name: string; timezone?: string | null }; user: { id: string } };
 
 /** Creates a draft campaign from a template and returns its id, or null if it couldn't be saved. */
 export async function createDraftFromTemplate(ctx: Owner & { access?: Access | null }, tpl: ResolvedTemplate, name: string): Promise<string | null> {
   // A draft starts in the template's department when the creator may use it, else in their own (or none).
   const a = ctx.access;
   const departmentId = tpl.departmentId && canAccessDepartment(a, tpl.departmentId) ? tpl.departmentId : a && !a.allDepartments ? a.departmentIds[0] ?? null : null;
+  // The built-in starters become one of the editor's layouts; anything else (a saved template) becomes a custom layout.
+  const design = designFromStarter(tpl.id) ?? designFromLegacyBlocks(tpl.blocks);
+  const logo = await getEmailLogo(ctx.db, ctx.workspace.id);
   const { data, error } = await ctx.db.from("campaigns").insert({
     workspace_id: ctx.workspace.id, name, subject: tpl.subject, preview_text: tpl.preview_text,
-    blocks: tpl.blocks, html: renderBlocks(tpl.blocks, { preview: tpl.preview_text }),
+    design, html: renderCampaignHtml(design, { logo, tz: ctx.workspace.timezone || "UTC" }, tpl.preview_text),
+    // The audience starts empty: choosing who receives it is a deliberate step in the editor.
+    audience_mode: "custom",
     created_by: ctx.user.id, from_name: ctx.workspace.name, variables: tpl.variables, department_id: departmentId,
   }).select("id").single();
   return error || !data ? null : (data as { id: string }).id;

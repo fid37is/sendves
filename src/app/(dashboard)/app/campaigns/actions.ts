@@ -3,14 +3,15 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { limitsFor } from "@/config/plan-limits";
-import { canAccessDepartment, canAssignDepartment } from "@/lib/access";
-import { renderBlocks } from "@/lib/email/blocks";
-import { sanitizeBlocks } from "@/lib/email/sanitize";
-import { analyzeVariables, blockStrings, knownKeys, sanitizeVariables } from "@/lib/email/variables";
-import { getAudienceOptions, getContactFieldKeys } from "@/lib/queries";
+import { can, NO_PERMISSION, type Permission } from "@/lib/access";
+import { canAccessDepartment } from "@/lib/access";
+import { renderCampaignHtml, reviewChecks, sanitizeDesign, sanitizeLogo, type Design, type Logo } from "@/lib/email/campaign";
+import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
+import { getAudienceOptions } from "@/lib/queries";
 import { go } from "@/lib/flash";
-import { requireWorkspace } from "@/lib/workspace";
+import { getContext, requireWorkspace } from "@/lib/workspace";
 import { audienceSize, parseSelection, saveAudience, type AudienceSelection } from "@/server/audience";
+import { assetRule, getEmailLogo, saveEmailLogo } from "@/server/email-assets";
 import { checkSender } from "@/server/senders";
 import { inScope } from "@/server/scope";
 import { getProvider } from "@/server/sending/providers";
@@ -40,23 +41,52 @@ async function loadCampaign(ctx: Ctx, id: string) {
   return c && canAccessDepartment(ctx.access, c.department_id) ? c : null;
 }
 
-/** Reads and validates the editor form into the row stored on a draft. Never redirects. */
-async function draftRow(ctx: Ctx, formData: FormData, current: { department_id: string | null; sender_identity_id: string | null }) {
-  let blocksInput: unknown = [];
-  try { blocksInput = JSON.parse(String(formData.get("blocks") ?? "[]")); } catch { /* treated as empty */ }
-  const blocks = sanitizeBlocks(blocksInput);
+/** What the editor sends to be saved, tested or sent. Everything in it is validated again here. */
+export type EditorPayload = {
+  id: string;
+  senderId: string;
+  subject: string;
+  preheader: string;
+  audience: { mode: "all" | "custom"; listIds: string[]; contactIds: string[] };
+  design: unknown;
+  logo: unknown;
+  variables: unknown;
+};
 
-  let variablesInput: unknown = [];
-  try { variablesInput = JSON.parse(String(formData.get("variables") ?? "[]")); } catch { /* treated as empty */ }
+export type SaveResult =
+  | { ok: true; savedAt: string }
+  /** `fatal` means retrying won't help (the campaign is gone or no longer a draft). */
+  | { ok: false; error: string; fatal?: boolean };
 
-  // Sender: the person's own work email or one of their aliases, in THIS workspace. A draft that already
-  // uses someone else's address keeps it until the sender is changed. The address and name come from
-  // the identity, never from the browser, so nobody can type another company's address.
-  let senderId: string | null = current.sender_identity_id;
+/** Signed in, with a workspace and the given permissions. Returns a message instead of redirecting, so the editor stays open. */
+async function authorize(...need: Permission[]) {
+  const ctx = await getContext();
+  if (!ctx?.workspace || !ctx.db || !ctx.access) return { ok: false as const, error: "Your workspace isn’t available right now. Refresh and try again." };
+  if (!need.every((p) => can(ctx.access, p))) return { ok: false as const, error: NO_PERMISSION };
+  return { ok: true as const, ctx: { user: ctx.user, workspace: ctx.workspace, db: ctx.db, access: ctx.access } };
+}
+
+type Saved = {
+  id: string; subject: string; preheader: string; html: string; design: Design; logo: Logo; variables: VariableDef[];
+  senderId: string | null; selection: AudienceSelection;
+};
+
+/**
+ * Validates what the editor sent and stores it on the draft: the content, the sender, the audience and
+ * the workspace's shared logo. The sender's address and name come from the sender identity, never from
+ * the browser, so nobody can type another company's address.
+ */
+async function persistDraft(ctx: Ctx, p: EditorPayload): Promise<{ ok: true; saved: Saved } | { ok: false; error: string; fatal?: boolean }> {
+  const id = String(p?.id ?? "").slice(0, 60);
+  const c = await loadCampaign(ctx, id);
+  if (!c) return { ok: false, error: "This campaign no longer exists.", fatal: true };
+  if (c.status !== "draft") return { ok: false, error: "This campaign has already been sent or scheduled, so it can’t be edited.", fatal: true };
+
+  let senderId: string | null = c.sender_identity_id;
   let fromEmail = "";
   let fromName = "";
-  if (formData.has("senderId")) {
-    const wanted = text(formData, "senderId", 60);
+  if (typeof p.senderId === "string") {
+    const wanted = p.senderId.slice(0, 60);
     senderId = null;
     if (UUID_RE.test(wanted)) {
       const { data } = await ctx.db.from("sender_identities").select("id").eq("id", wanted).eq("workspace_id", ctx.workspace.id).maybeSingle();
@@ -66,180 +96,135 @@ async function draftRow(ctx: Ctx, formData: FormData, current: { department_id: 
   if (senderId) {
     const { data } = await ctx.db.from("sender_identities").select("id, email, from_name, user_id").eq("id", senderId).eq("workspace_id", ctx.workspace.id).maybeSingle();
     const ident = data as { id: string; email: string; from_name: string; user_id: string | null } | null;
-    if (ident && (ident.user_id === ctx.user.id || ident.id === current.sender_identity_id)) { fromEmail = ident.email; fromName = ident.from_name; }
+    // A draft that already uses someone else's address keeps it until the sender is changed.
+    if (ident && (ident.user_id === ctx.user.id || ident.id === c.sender_identity_id)) { fromEmail = ident.email; fromName = ident.from_name; }
     else senderId = null;
   }
 
-  // Department: only one the person may assign. Unchanged when the form doesn't send one.
-  let departmentId = current.department_id;
-  if (formData.has("departmentId")) {
-    const wanted = text(formData, "departmentId", 60);
-    if (!wanted) departmentId = canAssignDepartment(ctx.access, null) ? null : current.department_id;
-    else if (UUID_RE.test(wanted)) {
-      const { data } = await ctx.db.from("departments").select("id").eq("id", wanted).eq("workspace_id", ctx.workspace.id).maybeSingle();
-      if (data && canAssignDepartment(ctx.access, wanted)) departmentId = wanted;
-    }
+  const rule = assetRule(ctx.workspace.id);
+  const design = sanitizeDesign(p.design, rule);
+  const logo = sanitizeLogo(p.logo, rule);
+  const variables = sanitizeVariables(p.variables);
+  const subject = String(p.subject ?? "").trim().slice(0, 200);
+  const preheader = String(p.preheader ?? "").trim().slice(0, 200);
+
+  // The logo belongs to the workspace and is reused by every campaign.
+  const current = await getEmailLogo(ctx.db, ctx.workspace.id);
+  if (JSON.stringify(current) !== JSON.stringify(logo) && !(await saveEmailLogo(ctx.db, ctx.workspace.id, logo))) {
+    return { ok: false, error: "Couldn’t save the logo." };
   }
 
-  const previewText = text(formData, "previewText", 200);
-  return {
-    name: text(formData, "name", 120) || "Untitled campaign",
-    subject: text(formData, "subject", 200),
-    preview_text: previewText,
-    from_name: fromName,
-    from_email: fromEmail,
-    sender_identity_id: senderId,
-    department_id: departmentId,
-    variables: sanitizeVariables(variablesInput),
-    blocks,
-    html: renderBlocks(blocks, { preview: previewText }),
-  };
-}
-
-/** The audience posted by the editor, or null when the form didn't include one (left untouched). */
-function postedAudience(formData: FormData): AudienceSelection | null {
-  const raw = formData.get("audience");
-  if (typeof raw !== "string" || !raw) return null;
-  try { return parseSelection(JSON.parse(raw)); } catch { return null; }
-}
-
-/** Saves the editor form onto a draft campaign and returns the stored values. */
-async function saveDraft(ctx: Ctx, formData: FormData) {
-  const id = text(formData, "id", 60);
-  const c = await loadCampaign(ctx, id);
-  if (!c) go("/app/campaigns", "err", "Campaign not found.");
-  if (c.status !== "draft") go(page(id), "err", "Only drafts can be edited.");
-
-  const row = await draftRow(ctx, formData, c);
-  await ctx.db.from("campaigns").update(row).eq("id", id).eq("workspace_id", ctx.workspace.id);
-  const audience = postedAudience(formData);
-  if (audience) {
-    const saved = await saveAudience(ctx, id, audience);
-    if (!saved.ok) go(page(id), "err", saved.error);
-  }
-  return { id, ...row, audience };
-}
-
-export type AutosaveResult =
-  | { ok: true; savedAt: string }
-  /** `fatal` means retrying won't help (the campaign is gone or no longer a draft). */
-  | { ok: false; error: string; fatal?: boolean };
-
-/** Background save from the editor. Unlike the buttons it never redirects, so typing isn't interrupted. */
-export async function autosaveCampaignAction(formData: FormData): Promise<AutosaveResult> {
-  const ctx = await requireWorkspace("/app/campaigns", "campaigns.manage");
-  const id = text(formData, "id", 60);
-  const c = await loadCampaign(ctx, id);
-  if (!c) return { ok: false, error: "This campaign no longer exists.", fatal: true };
-  if (c.status !== "draft") return { ok: false, error: "This campaign can’t be edited.", fatal: true };
-
-  const row = await draftRow(ctx, formData, c);
-  // The status guard stops a late autosave from touching a campaign that was just scheduled.
-  const { error } = await ctx.db.from("campaigns").update(row).eq("id", id).eq("workspace_id", ctx.workspace.id).eq("status", "draft");
+  const html = renderCampaignHtml(design, { logo, tz: ctx.workspace.timezone || "UTC" }, preheader);
+  // The status guard stops a late save from touching a campaign that was just scheduled.
+  const { error } = await ctx.db.from("campaigns").update({
+    subject, preview_text: preheader, from_name: fromName, from_email: fromEmail, sender_identity_id: senderId,
+    variables, design, html,
+  }).eq("id", id).eq("workspace_id", ctx.workspace.id).eq("status", "draft");
   if (error) return { ok: false, error: "Couldn’t save your changes." };
-  const audience = postedAudience(formData);
-  if (audience) {
-    const saved = await saveAudience(ctx, id, audience);
-    if (!saved.ok) return { ok: false, error: saved.error };
-  }
-  return { ok: true, savedAt: new Date().toISOString() };
+
+  const selection = parseSelection(p.audience);
+  const saved = await saveAudience(ctx, id, selection);
+  if (!saved.ok) return { ok: false, error: saved.error };
+  return { ok: true, saved: { id, subject, preheader, html, design, logo, variables, senderId, selection } };
 }
 
-export async function saveCampaignAction(formData: FormData) {
-  const ctx = await requireWorkspace("/app/campaigns", "campaigns.manage");
-  const c = await saveDraft(ctx, formData);
-  revalidatePath(page(c.id));
-  go(page(c.id), "ok", "Draft saved.");
+/** Background save from the editor. It never redirects, so typing isn't interrupted. */
+export async function autosaveCampaignAction(payload: EditorPayload): Promise<SaveResult> {
+  const a = await authorize("campaigns.manage");
+  if (!a.ok) return { ok: false, error: a.error };
+  const res = await persistDraft(a.ctx, payload);
+  return res.ok ? { ok: true, savedAt: new Date().toISOString() } : res;
 }
 
-export async function sendTestAction(formData: FormData) {
-  const ctx = await requireWorkspace("/app/campaigns", "campaigns.manage");
-  const c = await saveDraft(ctx, formData);
-  const back = page(c.id);
+export type TestResult = { ok: true; to: string } | { ok: false; error: string };
 
-  if (!c.subject) go(back, "err", "Add a subject line before sending a test.");
-  const sender = await checkSender(ctx.db, ctx.workspace.id, c.sender_identity_id);
-  if (!sender.ok) go(back, "err", sender.reason);
-  if (!ctx.workspace.business_address) go(back, "err", "Add your business address in Settings first. It appears in every email footer.");
+/** Saves the draft, then sends it to the signed-in person so they can see it in a real inbox. */
+export async function sendTestAction(payload: EditorPayload): Promise<TestResult> {
+  const a = await authorize("campaigns.manage");
+  if (!a.ok) return { ok: false, error: a.error };
+  const ctx = a.ctx;
+  const res = await persistDraft(ctx, payload);
+  if (!res.ok) return { ok: false, error: res.error };
+  const c = res.saved;
+
+  if (!c.subject) return { ok: false, error: "Add a subject before sending a test." };
+  const sender = await checkSender(ctx.db, ctx.workspace.id, c.senderId);
+  if (!sender.ok) return { ok: false, error: sender.reason };
+  if (!ctx.workspace.business_address) return { ok: false, error: "Add your business address in Settings first. It appears at the end of every email." };
 
   const email = buildEmail({
     campaign: { id: c.id, subject: c.subject, from_name: sender.identity.from_name, from_email: sender.identity.email, html: c.html, variables: c.variables },
-    workspace: { name: ctx.workspace.name, business_address: ctx.workspace.business_address, track_opens: false },
+    workspace: { name: ctx.workspace.name, business_address: ctx.workspace.business_address, track_opens: false, timezone: ctx.workspace.timezone },
     contact: { first_name: ctx.user.fullName.split(" ")[0] || null, last_name: null, email: ctx.user.email },
     sendId: null, subjectPrefix: "[Test] ",
   });
   try {
     await getProvider().send(email);
   } catch (err) {
-    go(back, "err", `Couldn’t send the test: ${(err as Error).message}`);
+    return { ok: false, error: `Couldn’t send the test: ${(err as Error).message}` };
   }
-  go(back, "ok", `Test email sent to ${ctx.user.email}.`);
+  return { ok: true, to: ctx.user.email };
 }
 
-export async function submitCampaignAction(formData: FormData) {
-  const ctx = await requireWorkspace("/app/campaigns", ["campaigns.manage", "campaigns.send"]);
-  const c = await saveDraft(ctx, formData);
-  const back = page(c.id);
-  const problems: string[] = [];
+export type SubmitInput = EditorPayload & { mode: "now" | "later"; scheduledAtIso?: string };
+export type SubmitResult =
+  | { ok: true; mode: "now" | "later"; recipients: number; inReview: boolean }
+  | { ok: false; error: string };
 
-  if (!c.subject) problems.push("add a subject line");
-  if (c.blocks.length === 0) problems.push("add some content");
-  if (!ctx.workspace.business_address) problems.push("add your business address in Settings");
+/** Saves the draft, checks everything again on the server, then queues it to send now or at the chosen time. */
+export async function submitCampaignAction(input: SubmitInput): Promise<SubmitResult> {
+  const a = await authorize("campaigns.manage", "campaigns.send");
+  if (!a.ok) return { ok: false, error: a.error };
+  const ctx = a.ctx;
+  const res = await persistDraft(ctx, input);
+  if (!res.ok) return { ok: false, error: res.error };
+  const c = res.saved;
+
+  const problems: string[] = [];
   if (ctx.workspace.status === "suspended") problems.push("resolve your account suspension (contact support)");
 
   // The sender must be an active identity on a verified domain of THIS workspace.
-  const sender = await checkSender(ctx.db, ctx.workspace.id, c.sender_identity_id);
-  if (!sender.ok) problems.push(sender.reason.charAt(0).toLowerCase() + sender.reason.slice(1).replace(/\.$/, ""));
-
+  const sender = await checkSender(ctx.db, ctx.workspace.id, c.senderId);
   // Audience, counted by the same rules the delivery queue uses.
-  const stored = await ctx.db.from("campaigns").select("audience_mode").eq("id", c.id).maybeSingle();
-  const [{ data: lists }, { data: contacts }] = await Promise.all([
-    ctx.db.from("campaign_audience_lists").select("list_id").eq("campaign_id", c.id),
-    ctx.db.from("campaign_audience_contacts").select("contact_id").eq("campaign_id", c.id).limit(5000),
-  ]);
-  const recipients = await audienceSize(ctx, {
-    mode: (stored.data as { audience_mode?: string } | null)?.audience_mode === "custom" ? "custom" : "all",
-    listIds: ((lists ?? []) as { list_id: string }[]).map((l) => l.list_id),
-    contactIds: ((contacts ?? []) as { contact_id: string }[]).map((r) => r.contact_id),
-  });
-  if (recipients === 0) problems.push("choose an audience with at least one subscribed contact");
+  const recipients = await audienceSize(ctx, c.selection);
 
-  // Variables that would leave a blank or show raw {{braces}} in the email.
-  const fieldKeys = await getContactFieldKeys(ctx);
-  const report = analyzeVariables([c.subject, c.preview_text, ...blockStrings(c.blocks)], knownKeys(fieldKeys, c.variables), c.variables);
-  if (report.malformed.length) problems.push(`fix ${report.malformed.slice(0, 3).join(", ")}, which can’t be read as a variable`);
-  if (report.undefinedKeys.length) problems.push(`define ${report.undefinedKeys.slice(0, 3).map((k) => `{{${k}}}`).join(", ")} on the Variables tab, or give it a fallback like {{${report.undefinedKeys[0]}|friend}}`);
+  const checks = reviewChecks({
+    subject: c.subject, design: c.design, logo: c.logo, variables: c.variables, extraTexts: [c.subject, c.preheader],
+    audience: { chosen: c.selection.mode === "all" || c.selection.listIds.length > 0 || c.selection.contactIds.length > 0, name: "", size: recipients },
+    sender: { ok: sender.ok, label: "", problem: sender.ok ? null : sender.reason },
+    addressSet: Boolean(ctx.workspace.business_address),
+  });
+  for (const k of checks) if (!k.ok && k.problem) problems.push(k.problem);
 
   const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString();
   const { count: usedThisMonth } = await ctx.db.from("sends").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id).gte("created_at", monthStart);
   const monthly = limitsFor(ctx.workspace.plan).monthlySends;
   if ((usedThisMonth ?? 0) + recipients > monthly) problems.push(`stay within your monthly limit of ${monthly.toLocaleString("en-US")} emails (this would use ${((usedThisMonth ?? 0) + recipients).toLocaleString("en-US")})`);
 
-  if (problems.length || !sender.ok) go(back, "err", `Before sending, please ${problems.join(", ")}.`);
-
   let when = new Date();
-  const mode = text(formData, "mode", 10);
-  if (mode === "later") {
-    const parsed = new Date(text(formData, "scheduledAtIso", 40));
+  if (input.mode === "later") {
+    const parsed = new Date(String(input.scheduledAtIso ?? ""));
     const now = Date.now();
     if (Number.isNaN(parsed.getTime()) || parsed.getTime() < now + 60_000 || parsed.getTime() > now + 90 * 86400_000) {
-      go(back, "err", "Pick a schedule time between 1 minute and 90 days from now.");
+      problems.push("pick a schedule time between 1 minute and 90 days from now");
     }
     when = parsed;
   }
 
+  if (problems.length || !sender.ok) return { ok: false, error: `Before sending, please ${problems.join(", ")}.` };
+
   const needsReview = ctx.workspace.status === "review";
-  await ctx.db.from("campaigns").update({
+  const { error } = await ctx.db.from("campaigns").update({
     status: "scheduled", scheduled_at: when.toISOString(), recipient_count: recipients,
     review_status: needsReview ? "pending" : "not_required",
     // Re-derived from the identity at the moment of sending, in case it was edited since the draft was saved.
     from_email: sender.identity.email, from_name: sender.identity.from_name, pause_reason: null,
   }).eq("id", c.id).eq("workspace_id", ctx.workspace.id).eq("status", "draft");
+  if (error) return { ok: false, error: "Couldn’t queue the campaign. Try again." };
 
   revalidatePath("/app/campaigns");
-  go(back, "ok", needsReview
-    ? "Submitted for review. New accounts have their first campaign checked before it sends, usually within a day."
-    : mode === "later" ? "Campaign scheduled." : "Campaign queued. It will start sending in a moment.");
+  revalidatePath(page(c.id));
+  return { ok: true, mode: input.mode, recipients, inReview: needsReview };
 }
 
 async function loadOwned(ctx: Ctx, formData: FormData) {
