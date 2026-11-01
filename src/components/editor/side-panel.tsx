@@ -1,14 +1,17 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { emailCanvas } from "@/config/brand";
 import {
-  ADDABLE_BLOCKS, BLOCK_LABELS, BRAND_COLORS, CONDITIONS, EXTRA_EDITOR_BLOCKS, GRADIENT_COUNT, TEMPLATE_BLURBS, TEMPLATE_KEYS, TEMPLATE_NAMES,
-  type BlockType, type Cond, type Design, type EmailBlock, type Layout, type Logo, type Product, type SlotKey, type Tab,
+  ADDABLE_BLOCKS, BLOCK_LABELS, blankGalleryImage, CONDITIONS, EXTRA_EDITOR_BLOCKS, GRADIENT_COUNT, hasFmt, IMAGE_WIDTHS, MAX_GALLERY_IMAGES,
+  TEMPLATE_BLURBS, TEMPLATE_KEYS, TEMPLATE_NAMES,
+  type BlockType, type Cond, type Design, type EmailBlock, type Fmt, type FmtSlot, type GalleryImage, type Layout, type Logo, type Product, type SlotKey, type Tab,
 } from "@/lib/email/campaign";
+import { cleanHex, DARK_TEXT } from "@/lib/email/color";
 import { cn } from "@/lib/utils";
 import { Hint, Lbl, LayoutThumb, Seg, SelectBox, TextArea, TextInput } from "@/components/editor/controls";
-import type { Doc } from "@/components/editor/types";
+import type { Doc, UploadTarget } from "@/components/editor/types";
 
 const SLOT_FIELD: Partial<Record<SlotKey, "headline" | "body" | "btn" | "foot">> = { headline: "headline", body: "body", button: "btn", footer: "foot" };
 const SLOT_LABEL: Partial<Record<SlotKey, string>> = { headline: "Headline", body: "Body", button: "Button label", footer: "Footer" };
@@ -26,8 +29,10 @@ export type PanelProps = {
   mutate: (fn: (d: Doc) => Doc, record?: boolean) => void;
   addBlock: (t: BlockType) => void;
   askLayout: (k: Layout) => void;
-  pickImage: (kind: "logo" | "banner") => void;
+  pickImage: (target: UploadTarget) => void;
   uploading: boolean;
+  /** Called after a choice that changes the email (on a phone this closes the panel so the result is visible). */
+  afterPick: () => void;
   /** Every variable the email can use, with how it is named. */
   variables: { key: string; label: string }[];
   fallbacks: Record<string, string>;
@@ -35,6 +40,35 @@ export type PanelProps = {
   insertVariable: (key: string) => void;
   pickPreset: (g: number) => void;
 };
+
+/** An on/off button (Bold, Italic). */
+function Toggle({ on, onClick, children, label }: { on: boolean; onClick: () => void; children: React.ReactNode; label: string }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-label={label}
+      onClick={onClick}
+      className={cn("rounded-full border px-3 py-1.5 text-[13px] transition-colors", on ? "border-brand-700 bg-brand-50 font-semibold text-brand-800" : "border-mist bg-white text-ink-soft hover:bg-mist-100")}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Any brand colour: a field for the #rrggbb code that accepts it once it is complete. */
+function HexField({ value, onCommit }: { value: string; onCommit: (hex: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const valid = /^#[0-9a-f]{6}$/i.test(draft);
+  return (
+    <TextInput
+      id="bhex" value={draft} maxLength={7} placeholder="#164e63" aria-label="Hex color code" aria-invalid={!valid && draft !== value ? true : undefined} className="w-28"
+      onChange={(e) => { const v = e.target.value.trim(); setDraft(v); if (/^#[0-9a-f]{6}$/i.test(v)) onCommit(v.toLowerCase()); }}
+      onBlur={() => setDraft(valid ? draft.toLowerCase() : value)}
+    />
+  );
+}
 
 /** The right-hand panel: Templates, Blocks, Edit, Variables, Media and Brand. */
 export function SidePanel(p: PanelProps) {
@@ -46,7 +80,7 @@ export function SidePanel(p: PanelProps) {
   // ── Ways to change the design (typing is not recorded for Undo; structural changes are) ──
   const setDesign = (fn: (d: Design) => Design, record = false) => p.mutate((doc) => ({ ...doc, design: fn(doc.design) }), record);
   const setC = (patch: Partial<Design["C"]>) => setDesign((d) => ({ ...d, C: { ...d.C, ...patch } }));
-  const setBlock = (patch: Partial<EmailBlock>) => { const id = p.selBlock?.id; if (id) setDesign((d) => ({ ...d, blocks: d.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)) })); };
+  const setBlock = (patch: Partial<EmailBlock>, record = false) => { const id = p.selBlock?.id; if (id) setDesign((d) => ({ ...d, blocks: d.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)) }), record); };
   const setBanner = (patch: Partial<Design["banner"]>, record = false) => setDesign((d) => ({ ...d, banner: { ...d.banner, ...patch } }), record);
   const setLogo = (patch: Partial<Logo>) => p.mutate((doc) => ({ ...doc, logo: { ...doc.logo, ...patch } }), true);
   const setCond = (v: Cond) => {
@@ -55,19 +89,54 @@ export function SidePanel(p: PanelProps) {
   };
 
   // ── Pieces shared by several tabs ──
-  const linkField = (url: string | undefined, onChange: (v: string) => void) => (
+  const linkField = (url: string | undefined, onChange: (v: string) => void, id = "bu", label = "Link URL") => (
     <>
-      <Lbl htmlFor="bu">Link URL</Lbl>
-      <TextInput id="bu" inputMode="url" value={url ?? ""} placeholder="https://example.com" onChange={(e) => onChange(e.target.value)} />
+      <Lbl htmlFor={id}>{label}</Lbl>
+      <TextInput id={id} inputMode="url" value={url ?? ""} placeholder="https://example.com" onChange={(e) => onChange(e.target.value)} />
       <Hint>Starts with https:// or mailto:</Hint>
     </>
   );
+
+  /**
+   * Alignment, bold, italic and colour for a whole block (not part of a sentence). `current` is the block's
+   * formatting and `change` stores the new one; an empty formatting removes it.
+   */
+  const fmtControls = (current: Fmt | undefined, change: (next: Fmt | undefined) => void, record = true) => {
+    const f: Fmt = current ?? {};
+    const set = (patch: Partial<Fmt>, rec = record) => { const next: Fmt = { ...f, ...patch }; (Object.keys(next) as (keyof Fmt)[]).forEach((k) => { if (!next[k]) delete next[k]; }); changeRec(hasFmt(next) ? next : undefined, rec); };
+    const changeRec = (next: Fmt | undefined, rec: boolean) => { if (rec) p.mutate((d) => d, true); change(next); };
+    return (
+      <>
+        <Lbl>Alignment</Lbl>
+        <Seg label="Text alignment" value={(f.al ?? "") as "" | "left" | "center" | "right"} onChange={(v) => set({ al: f.al === v ? undefined : (v as "left" | "center" | "right") })}
+          options={[{ value: "left", label: "Left" }, { value: "center", label: "Center" }, { value: "right", label: "Right" }]} />
+        <Lbl>Style</Lbl>
+        <div className="flex gap-1.5">
+          <Toggle on={Boolean(f.b)} label="Bold" onClick={() => set({ b: !f.b })}><b>Bold</b></Toggle>
+          <Toggle on={Boolean(f.i)} label="Italic" onClick={() => set({ i: !f.i })}><i>Italic</i></Toggle>
+        </div>
+        <Lbl htmlFor="fcol">Text color</Lbl>
+        <div className="flex flex-wrap items-center gap-2">
+          <input id="fcol" type="color" aria-label="Text color" className="h-9 w-12 cursor-pointer rounded-lg border border-mist bg-white p-1" value={f.col ?? DARK_TEXT} onChange={(e) => set({ col: cleanHex(e.target.value) }, false)} />
+          <Button size="sm" variant="outline" disabled={!hasFmt(current)} onClick={() => changeRec(undefined, record)}>Reset formatting</Button>
+        </div>
+        <Hint>Applies to the whole block. {f.col ? "" : "Without a chosen color, the default is used."}</Hint>
+      </>
+    );
+  };
+
+  const slotFmt = (slot: FmtSlot) => fmtControls(D.fmt[slot], (next) => setDesign((d) => {
+    const fmt = { ...d.fmt };
+    if (next) fmt[slot] = next; else delete fmt[slot];
+    return { ...d, fmt };
+  }));
+  const blockFmt = (b: EmailBlock) => fmtControls(b.f, (next) => setBlock({ f: next }));
 
   const logoControls = (
     <>
       <Lbl>Logo</Lbl>
       <div className="flex flex-wrap gap-1.5">
-        <Button size="sm" variant="outline" disabled={p.uploading} onClick={() => p.pickImage("logo")}>{logo.src ? "Replace logo" : "Upload logo"}</Button>
+        <Button size="sm" variant="outline" disabled={p.uploading} onClick={() => p.pickImage({ kind: "logo" })}>{logo.src ? "Replace logo" : "Upload logo"}</Button>
         {logo.src ? <Button size="sm" variant="outline" onClick={() => p.mutate((d) => ({ ...d, logo: { ...d.logo, src: "", w: 0, h: 0 } }), true)}>Remove</Button> : null}
       </div>
       <Lbl>Alignment</Lbl>
@@ -83,7 +152,7 @@ export function SidePanel(p: PanelProps) {
     <>
       <Lbl>Banner</Lbl>
       <div className="flex flex-wrap gap-1.5">
-        <Button size="sm" variant="outline" disabled={p.uploading} onClick={() => p.pickImage("banner")}>{D.banner.src ? "Replace image" : "Upload banner"}</Button>
+        <Button size="sm" variant="outline" disabled={p.uploading} onClick={() => p.pickImage({ kind: "banner" })}>{D.banner.src ? "Replace image" : "Upload banner"}</Button>
         {D.banner.src ? <Button size="sm" variant="outline" onClick={() => setBanner({ src: "" }, true)}>Remove</Button> : null}
       </div>
       {uploaded ? (
@@ -99,6 +168,54 @@ export function SidePanel(p: PanelProps) {
       <Hint><b>Shared asset.</b> Every banner in this email shows this same image. Cropped to 600×200 automatically.</Hint>
     </>
   );
+
+  /** An Image block: its own picture, width, description and link. */
+  const imageEditor = (b: EmailBlock) => (
+    <>
+      <Lbl>Image</Lbl>
+      <div className="flex flex-wrap gap-1.5">
+        <Button size="sm" variant="outline" disabled={p.uploading} onClick={() => p.pickImage({ kind: "image", blockId: b.id })}>{b.url ? "Replace image" : "Upload image"}</Button>
+        {b.url ? <Button size="sm" variant="outline" onClick={() => setBlock({ url: undefined }, true)}>Remove</Button> : null}
+      </div>
+      <Lbl>Width</Lbl>
+      <Seg label="Image width" value={String(b.w ?? 100) as "100" | "75" | "50"} onChange={(v) => setBlock({ w: Number(v) as 100 | 75 | 50 }, true)}
+        options={IMAGE_WIDTHS.map((w) => ({ value: String(w) as "100" | "75" | "50", label: w === 100 ? "Full" : w === 75 ? "Medium" : "Small" }))} />
+      <Lbl htmlFor="ialt">Alt text</Lbl>
+      <TextInput id="ialt" value={b.alt ?? ""} maxLength={300} placeholder="Describe the image" onChange={(e) => setBlock({ alt: e.target.value })} />
+      <Hint>Read aloud by screen readers and shown when pictures are blocked.</Hint>
+      {linkField(b.link, (v) => setBlock({ link: v }), "iu", "Link URL (optional)")}
+      <Hint>Or pick a placeholder in the Media tab.</Hint>
+    </>
+  );
+
+  /** An Image grid: 2 or 3 pictures per row, up to six, each with its own description and link. */
+  const galleryEditor = (b: EmailBlock) => {
+    const imgs = b.imgs ?? [];
+    const setImg = (i: number, patch: Partial<GalleryImage>, record = false) => setBlock({ imgs: imgs.map((x, j) => (j === i ? { ...x, ...patch } : x)) }, record);
+    return (
+      <>
+        <Lbl>Columns</Lbl>
+        <Seg label="Pictures per row" value={String(b.cols ?? 2) as "2" | "3"} onChange={(v) => setBlock({ cols: Number(v) as 2 | 3 }, true)} options={[{ value: "2", label: "2 per row" }, { value: "3", label: "3 per row" }]} />
+        {imgs.map((x, i) => (
+          <fieldset key={i} className="my-2.5 rounded-lg border border-mist p-2">
+            <legend className="px-1 text-xs font-semibold text-ink">Image {i + 1}</legend>
+            <div className="flex flex-wrap gap-1.5">
+              <Button size="sm" variant="outline" disabled={p.uploading} onClick={() => p.pickImage({ kind: "grid", blockId: b.id, index: i })}>{x.url ? "Replace" : "Upload"}</Button>
+              {imgs.length > 1 ? <Button size="sm" variant="outline" aria-label={`Remove image ${i + 1}`} onClick={() => setBlock({ imgs: imgs.filter((_, j) => j !== i) }, true)}>Remove</Button> : null}
+            </div>
+            <Lbl htmlFor={`ga${i}`}>Alt text</Lbl>
+            <TextInput id={`ga${i}`} value={x.alt} maxLength={300} placeholder="Describe the image" onChange={(e) => setImg(i, { alt: e.target.value })} />
+            <Lbl htmlFor={`gu${i}`}>Link URL (optional)</Lbl>
+            <TextInput id={`gu${i}`} inputMode="url" value={x.link} placeholder="https://example.com" onChange={(e) => setImg(i, { link: e.target.value })} />
+          </fieldset>
+        ))}
+        {imgs.length < MAX_GALLERY_IMAGES
+          ? <Button size="sm" variant="outline" onClick={() => setBlock({ imgs: [...imgs, blankGalleryImage()] }, true)}>Add another image</Button>
+          : <Hint>Up to {MAX_GALLERY_IMAGES} images per grid.</Hint>}
+        <Hint>Images are cropped to squares so the grid stays tidy.</Hint>
+      </>
+    );
+  };
 
   const productList = (list: Product[], onChange: (next: Product[]) => void) => (
     <>
@@ -122,6 +239,8 @@ export function SidePanel(p: PanelProps) {
   const extraEditor = (kind: string) => {
     const tpl = !custom;
     const date = tpl ? D.C.d : p.selBlock?.d ?? D.C.d;
+    if (kind === "image" && p.selBlock) return imageEditor(p.selBlock);
+    if (kind === "gallery" && p.selBlock) return galleryEditor(p.selBlock);
     if (kind === "columns") {
       const b = p.selBlock!;
       return (
@@ -226,6 +345,7 @@ export function SidePanel(p: PanelProps) {
           <Lbl htmlFor="sx">{SLOT_LABEL[slot]}</Lbl>
           <TextArea id="sx" rows={field === "body" ? 6 : 3} value={D.C[field]} maxLength={field === "body" ? 8000 : 500} onChange={(e) => setC({ [field]: e.target.value } as Partial<Design["C"]>)} />
           {slot === "button" ? linkField(D.C.u, (v) => setC({ u: v })) : null}
+          {slotFmt(slot as FmtSlot)}
           <Hint>The layout is fixed by the template.</Hint>
         </>
       );
@@ -236,19 +356,19 @@ export function SidePanel(p: PanelProps) {
   } else {
     const b = p.selBlock;
     let body: React.ReactNode;
-    if (EXTRA_EDITOR_BLOCKS.has(b.t)) body = extraEditor(b.t);
+    if (EXTRA_EDITOR_BLOCKS.has(b.t)) body = <>{extraEditor(b.t)}{b.t === "columns" ? blockFmt(b) : null}</>;
     else if (b.x !== undefined) {
       body = (
         <>
           <Lbl htmlFor="bx">Text</Lbl>
           <TextArea id="bx" rows={5} value={b.x} maxLength={b.t === "text" ? 8000 : 500} onChange={(e) => setBlock({ x: e.target.value })} />
           {b.t === "button" ? linkField(b.u, (v) => setBlock({ u: v })) : null}
+          {blockFmt(b)}
           <Hint>Insert variables from the Variables tab.</Hint>
         </>
       );
     } else if (b.t === "logo") body = logoControls;
     else if (b.t === "banner") body = bannerControls;
-    else if (b.t === "image") body = <p className="text-ink-muted">Pick an image in the Media tab.</p>;
     else body = <p className="text-ink-muted">Nothing to edit on this block.</p>;
     editTab = <>{body}{b.t !== "footer" ? condField(b.cond) : null}</>;
   }
@@ -270,6 +390,13 @@ export function SidePanel(p: PanelProps) {
   const selectedPreset = p.selBlock?.t === "image" && !p.selBlock.url ? p.selBlock.g : undefined;
   const mediaTab = (
     <>
+      {custom ? (
+        <>
+          <Lbl>Images</Lbl>
+          <Button size="sm" variant="outline" disabled={p.uploading} onClick={() => p.pickImage({ kind: "image" })}>Upload a new image</Button>
+          <Hint>Adds an image block. Each image block holds its own picture, so a campaign can carry as many as it needs.</Hint>
+        </>
+      ) : <Hint className="mb-1">Templates have one banner image. Choose Customize layout to add more images.</Hint>}
       {bannerControls}
       <Lbl>Presets</Lbl>
       <div className="grid grid-cols-2 gap-2">
@@ -291,23 +418,17 @@ export function SidePanel(p: PanelProps) {
     </>
   );
 
+  const setColor = (c: string) => { p.mutate((d) => ({ ...d, design: { ...d.design, color: c } }), true); };
   const brandTab = (
     <>
       {logoControls}
       <Lbl>Brand color</Lbl>
-      <div className="mt-1.5 flex gap-2">
-        {BRAND_COLORS.map((c) => (
-          <button
-            key={c}
-            type="button"
-            aria-label={`Color ${c}`}
-            aria-pressed={D.color === c}
-            onClick={() => p.mutate((d) => ({ ...d, design: { ...d.design, color: c } }), true)}
-            className={cn("h-7 w-7 rounded-full border-2", D.color === c ? "border-ink" : "border-transparent")}
-            style={{ background: c }}
-          />
-        ))}
+      <Lbl htmlFor="bhex">Color</Lbl>
+      <div className="flex items-center gap-2">
+        <input type="color" aria-label="Pick any color" className="h-9 w-12 cursor-pointer rounded-lg border border-mist bg-white p-1" value={D.color} onChange={(e) => setColor(e.target.value.toLowerCase())} />
+        <HexField value={D.color} onCommit={setColor} />
       </div>
+      <Hint>The brand color is used for buttons, the countdown and social icons. Text on it switches between light and dark automatically so it stays readable.</Hint>
     </>
   );
 

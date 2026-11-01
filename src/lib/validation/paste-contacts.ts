@@ -10,7 +10,14 @@ export type PasteParse = {
   duplicates: number;
 };
 
-const EMAIL_IN_TEXT = /[^\s,;<>"'()[\]]+@[^\s,;<>"'()[\]]+/g;
+/**
+ * Anything with an at sign in it counts as an attempt at an address, even a fragment like "bad@" or
+ * "@example.com", so it is reported as invalid instead of being ignored without a word.
+ */
+const EMAIL_IN_TEXT = /[^\s,;<>"'()[\]]*@[^\s,;<>"'()[\]]*/g;
+
+/** The most people one campaign takes from typed or pasted text. Larger lists go through a file import. */
+export const MAX_PASTED_RECIPIENTS = 500;
 
 function splitName(raw: string): { firstName: string; lastName: string } {
   const cleaned = raw.replace(/["']/g, "").replace(/[,;|\t]+/g, " ").replace(/\s+/g, " ").trim();
@@ -38,7 +45,8 @@ export function parsePastedContacts(text: string): PasteParse {
   };
 
   const push = (rawEmail: string, nameText: string) => {
-    const check = checkEmail(rawEmail);
+    // A full stop at the end is punctuation from the sentence it was pasted from, not part of the address.
+    const check = checkEmail(rawEmail.replace(/\.+$/, ""));
     if (!check.ok) return reject(rawEmail);
     if (seen.has(check.email)) {
       out.duplicates++;

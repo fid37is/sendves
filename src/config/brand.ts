@@ -121,8 +121,6 @@ export const emailCanvas = {
   chipInk: "#0B5B54",
   /** The email as dark-mode mail apps tend to show it (used by the preview's dark theme). */
   dark: { page: "#101216", card: "#1B1D21", ink: "#E6E8EC", muted: "#9AA0AA", rule: "#33373E" },
-  /** The colours a campaign can use for buttons, countdown tiles and social icons. The first is the default. */
-  brandColors: ["#0F766E", "#1D4ED8", "#B45309", "#BE123C"],
   /** The preset pictures for Image blocks, products and the banner: [from, to]. */
   gradients: [
     ["#0F766E", "#34D399"],

@@ -17,9 +17,10 @@
  *   [[sv-cd:days:2026-12-05]]               countdown numbers (fillCountdown)
  *   [[sv-unsub]]                            the recipient's unsubscribe link
  */
-import { emailCanvas } from "@/config/brand";
+import { emailCanvas, emailTheme } from "@/config/brand";
 import { escapeHtml, type Block as LegacyBlock } from "@/lib/email/blocks";
 import { VARIABLE_TOKEN_RE, BUILT_IN_VARIABLES, VARIABLE_KEY_RE, type VariableDef } from "@/lib/email/variables";
+import { cleanHex, contrastRatio, MIN_TEXT_CONTRAST, readableOn } from "@/lib/email/color";
 
 // ── Vocabulary ─────────────────────────────────────────────────────────────
 
@@ -50,18 +51,33 @@ export const CONDITIONS: { value: Cond; label: string }[] = [
 const COND_VALUES = new Set<string>(CONDITIONS.map((c) => c.value));
 
 export type SlotKey = "logo" | "banner" | "headline" | "countdown" | "products" | "body" | "button" | "footer";
-export type BlockType = "logo" | "banner" | "heading" | "text" | "image" | "columns" | "products" | "countdown" | "social" | "button" | "divider" | "footer";
-export const BLOCK_TYPES: readonly BlockType[] = ["logo", "banner", "heading", "text", "image", "columns", "products", "countdown", "social", "button", "divider", "footer"];
+export type BlockType = "logo" | "banner" | "heading" | "text" | "image" | "gallery" | "columns" | "products" | "countdown" | "social" | "button" | "divider" | "footer";
+export const BLOCK_TYPES: readonly BlockType[] = ["logo", "banner", "heading", "text", "image", "gallery", "columns", "products", "countdown", "social", "button", "divider", "footer"];
 export const BLOCK_LABELS: Record<BlockType, string> = {
-  logo: "Logo", banner: "Banner", heading: "Heading", text: "Text", image: "Image", columns: "Columns", products: "Products",
+  logo: "Logo", banner: "Banner", heading: "Heading", text: "Text", image: "Image", gallery: "Image grid", columns: "Columns", products: "Products",
   countdown: "Countdown", social: "Social", button: "Button", divider: "Divider", footer: "Footer",
 };
 /** The tiles of the Blocks tab, in order. (A logo only comes with a layout.) */
-export const ADDABLE_BLOCKS: readonly BlockType[] = ["heading", "text", "image", "banner", "columns", "products", "countdown", "social", "button", "divider", "footer"];
+export const ADDABLE_BLOCKS: readonly BlockType[] = ["heading", "text", "image", "gallery", "banner", "columns", "products", "countdown", "social", "button", "divider", "footer"];
 /** Blocks whose editor is more than one text box. */
-export const EXTRA_EDITOR_BLOCKS: ReadonlySet<BlockType> = new Set<BlockType>(["columns", "countdown", "products", "social"]);
+export const EXTRA_EDITOR_BLOCKS: ReadonlySet<BlockType> = new Set<BlockType>(["columns", "countdown", "products", "social", "image", "gallery"]);
 
-export const BRAND_COLORS: readonly string[] = emailCanvas.brandColors;
+/** The parts of a template whose text can be formatted. */
+export type FmtSlot = "headline" | "body" | "button" | "footer";
+export const FMT_SLOTS: readonly FmtSlot[] = ["headline", "body", "button", "footer"];
+/** Formatting applies to a whole block, never to a selection inside it. */
+export type Fmt = { al?: "left" | "center" | "right"; col?: string; b?: boolean; i?: boolean };
+export const hasFmt = (f: Fmt | undefined): boolean => Boolean(f && (f.al || f.col || f.b || f.i));
+
+export const IMAGE_WIDTHS = [100, 75, 50] as const;
+export type ImageWidth = (typeof IMAGE_WIDTHS)[number];
+export const MAX_GALLERY_IMAGES = 6;
+export const GALLERY_COLUMNS = [2, 3] as const;
+export type GalleryImage = { url: string; alt: string; link: string };
+export const blankGalleryImage = (): GalleryImage => ({ url: "", alt: "", link: "" });
+
+/** A new campaign starts with the product's own action colour; each campaign then takes whatever colour its author picks. */
+export const DEFAULT_BRAND_COLOR: string = emailTheme.action.toLowerCase();
 export const GRADIENT_COUNT = emailCanvas.gradients.length;
 const gradient = (i: number) => {
   const [a, b] = emailCanvas.gradients[((i % GRADIENT_COUNT) + GRADIENT_COUNT) % GRADIENT_COUNT];
@@ -91,8 +107,15 @@ export type EmailBlock = {
   p?: Product[];
   soc?: SocialLink[];
   cond?: Cond;
-  /** Only on an Image block that came from an older campaign, which could point at a picture. */
+  /** Image block: the uploaded picture, its description for screen readers and an optional link. */
   url?: string; alt?: string; link?: string;
+  /** Image block: how much of the email's width it takes (100, 75 or 50 percent). */
+  w?: ImageWidth;
+  /** Image grid: pictures per row and the pictures (at most MAX_GALLERY_IMAGES). */
+  cols?: 2 | 3;
+  imgs?: GalleryImage[];
+  /** Text formatting of the whole block. */
+  f?: Fmt;
 };
 export type Content = { headline: string; body: string; btn: string; u: string; foot: string; d: string; p: Product[] };
 export type Banner = { src: string; fx: number; fy: number; alt: string };
@@ -102,6 +125,8 @@ export type Design = {
   color: string;
   C: Content;
   cond: Partial<Record<SlotKey, Cond>>;
+  /** Formatting of the template's text parts (custom blocks carry their own, as `f`). */
+  fmt: Partial<Record<FmtSlot, Fmt>>;
   blocks: EmailBlock[];
   /** Blocks set aside while a template layout is in use; they come back when the layout is customised again. */
   tray: EmailBlock[];
@@ -123,7 +148,7 @@ export function defaultContent(now = Date.now()): Content {
 }
 
 export function defaultDesign(tpl: Layout = "announcement", now = Date.now()): Design {
-  const d: Design = { tpl, color: BRAND_COLORS[0], C: defaultContent(now), cond: {}, blocks: [], tray: [], banner: { src: "", fx: 50, fy: 50, alt: "" } };
+  const d: Design = { tpl, color: DEFAULT_BRAND_COLOR, C: defaultContent(now), cond: {}, fmt: {}, blocks: [], tray: [], banner: { src: "", fx: 50, fy: 50, alt: "" } };
   if (tpl === "custom") d.blocks = [{ id: newId(), t: "logo" }, { id: newId(), t: "footer", x: DEFAULT_FOOTER_TEXT }];
   return d;
 }
@@ -150,7 +175,22 @@ function sanitizeProducts(v: unknown, fallback: Product[]): Product[] {
   return out.length ? out : fallback;
 }
 
-function sanitizeBlocks(v: unknown, seen: Set<string>): EmailBlock[] {
+/** Alignment, bold, italic and a #rrggbb colour. Anything else is dropped. */
+export function sanitizeFmt(v: unknown): Fmt | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const f: Fmt = {};
+  if (o.al === "left" || o.al === "center" || o.al === "right") f.al = o.al;
+  const col = cleanHex(o.col);
+  if (col) f.col = col;
+  if (o.b === true) f.b = true;
+  if (o.i === true) f.i = true;
+  return hasFmt(f) ? f : undefined;
+}
+
+const cleanLink = (v: unknown): string => { const u = str(v, 2000).trim(); return isValidLink(u) ? u : ""; };
+
+function sanitizeBlocks(v: unknown, seen: Set<string>, rule: AssetRule): EmailBlock[] {
   if (!Array.isArray(v)) return [];
   const out: EmailBlock[] = [];
   for (const raw of v.slice(0, MAX_BLOCKS)) {
@@ -166,6 +206,7 @@ function sanitizeBlocks(v: unknown, seen: Set<string>): EmailBlock[] {
       case "heading": b.x = str(o.x, 300); break;
       case "text": b.x = str(o.x, 8000); break;
       case "footer": b.x = str(o.x, 500); break;
+      // A button's link is kept as typed, so the review can say it isn't valid; the sent email never links to it.
       case "button": b.x = str(o.x, 100); b.u = str(o.u, 2000).trim(); break;
       case "columns": b.x = str(o.x, 4000); b.y = str(o.y, 4000); break;
       case "countdown": b.d = validDate(o.d) ? o.d : isoDate(Date.now() + 14 * 864e5); break;
@@ -176,12 +217,30 @@ function sanitizeBlocks(v: unknown, seen: Set<string>): EmailBlock[] {
       }); break;
       case "image": {
         b.g = num(o.g, 0, GRADIENT_COUNT - 1, 0);
+        // Pictures are this workspace's uploads; an https address from an older campaign still opens.
         const url = str(o.url, 2000).trim();
-        if (/^https?:\/\//i.test(url)) { b.url = url; b.alt = str(o.alt, 300); const l = str(o.link, 2000).trim(); if (l) b.link = l; }
+        if (assetOk(url, rule) || /^https:\/\/[^\s"'<>\\]+$/i.test(url)) b.url = url;
+        const alt = str(o.alt, 300);
+        if (alt) b.alt = alt;
+        const link = cleanLink(o.link);
+        if (link) b.link = link;
+        if (o.w === 75 || o.w === 50) b.w = o.w;
+        break;
+      }
+      case "gallery": {
+        b.cols = o.cols === 3 ? 3 : 2;
+        const raw = Array.isArray(o.imgs) ? o.imgs.slice(0, MAX_GALLERY_IMAGES) : [];
+        const imgs = raw.map((x): GalleryImage => {
+          const g = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+          const url = str(g.url, 2000).trim();
+          return { url: assetOk(url, rule) ? url : "", alt: str(g.alt, 300), link: cleanLink(g.link) };
+        });
+        b.imgs = imgs.length ? imgs : [blankGalleryImage(), blankGalleryImage()];
         break;
       }
       default: break;
     }
+    if (t === "heading" || t === "text" || t === "columns" || t === "button" || t === "footer") { const f = sanitizeFmt(o.f); if (f) b.f = f; }
     out.push(b);
   }
   return out;
@@ -219,12 +278,16 @@ export function sanitizeDesign(input: unknown, rule: AssetRule, now = Date.now()
   const bn = (o.banner && typeof o.banner === "object" ? o.banner : {}) as Record<string, unknown>;
   const bsrc = typeof bn.src === "string" ? bn.src : "";
   const seen = new Set<string>();
-  const blocks = sanitizeBlocks(o.blocks, seen);
-  const tray = sanitizeBlocks(o.tray, seen);
+  const blocks = sanitizeBlocks(o.blocks, seen, rule);
+  const tray = sanitizeBlocks(o.tray, seen, rule);
+  const rawFmt = (o.fmt && typeof o.fmt === "object" ? o.fmt : {}) as Record<string, unknown>;
+  const fmt: Partial<Record<FmtSlot, Fmt>> = {};
+  for (const k of FMT_SLOTS) { const f = sanitizeFmt(rawFmt[k]); if (f) fmt[k] = f; }
   return {
     tpl,
-    color: BRAND_COLORS.includes(String(o.color)) ? String(o.color) : BRAND_COLORS[0],
-    C, cond: conds, blocks, tray,
+    // Any colour is allowed, but only as #rrggbb.
+    color: cleanHex(o.color, DEFAULT_BRAND_COLOR),
+    C, cond: conds, fmt, blocks, tray,
     banner: {
       src: /^g[0-5]$/.test(bsrc) ? bsrc : assetOk(bsrc, rule) ? bsrc : "",
       fx: num(bn.fx, 0, 100, 50), fy: num(bn.fy, 0, 100, 50), alt: str(bn.alt, 300),
@@ -359,6 +422,11 @@ type Mode = "edit" | "final";
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const { ink: INK, muted: MUTED, rule: RULE, card: CARD, page: PAGE, onColor: ON } = emailCanvas;
 
+/** Inline CSS for a block's formatting. It comes last in the style, so it wins over the defaults. */
+const fmtCss = (f?: Fmt) => (f ? `${f.al ? `text-align:${f.al};` : ""}${f.col ? `color:${f.col};` : ""}${f.b ? "font-weight:700;" : ""}${f.i ? "font-style:italic;" : ""}` : "");
+/** The dark-mode class is left off when the person chose a colour, so their choice is kept. */
+const withClass = (cls: string, f?: Fmt) => (f?.col ? "" : ` class="${cls}"`);
+
 export const variableLabel = (key: string, labels?: Record<string, string>) => labels?.[key.toLowerCase()] ?? key;
 export const prettyKey = (key: string) => { const s = key.replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
 
@@ -410,26 +478,33 @@ function bannerHtml(d: Design, mode: Mode): string {
   return `<img src="${escapeHtml(B.src)}" alt="${escapeHtml(B.alt)}" width="544" style="display:block;width:100%;max-width:544px;height:auto;aspect-ratio:3/1;object-fit:cover;object-position:${B.fx}% ${B.fy}%;border:0;border-radius:6px">`;
 }
 
-function headingHtml(text: string | undefined, mode: Mode, ctx: RenderCtx, o: { center?: boolean; size?: number } = {}): string {
-  return `<h2 class="sv-ink" style="margin:0;font-family:${FONT};font-size:${o.size ?? 26}px;line-height:1.2;font-weight:700;letter-spacing:normal;color:${INK};${o.center ? "text-align:center;" : ""}">${inline(text, mode, ctx)}</h2>`;
+function headingHtml(text: string | undefined, mode: Mode, ctx: RenderCtx, o: { center?: boolean; size?: number; f?: Fmt } = {}): string {
+  return `<h2${withClass("sv-ink", o.f)} style="margin:0;font-family:${FONT};font-size:${o.size ?? 26}px;line-height:1.2;font-weight:700;letter-spacing:normal;color:${INK};${o.center ? "text-align:center;" : ""}${fmtCss(o.f)}">${inline(text, mode, ctx)}</h2>`;
 }
 
-function paragraphHtml(text: string | undefined, mode: Mode, ctx: RenderCtx, center = false): string {
-  return `<p class="sv-ink" style="margin:0;font-family:${FONT};font-size:14px;line-height:1.45;color:${INK};${center ? "text-align:center;" : ""}">${inline(text, mode, ctx)}</p>`;
+function paragraphHtml(text: string | undefined, mode: Mode, ctx: RenderCtx, center = false, f?: Fmt): string {
+  return `<p${withClass("sv-ink", f)} style="margin:0;font-family:${FONT};font-size:14px;line-height:1.45;color:${INK};${center ? "text-align:center;" : ""}${fmtCss(f)}">${inline(text, mode, ctx)}</p>`;
 }
 
-function buttonHtml(label: string | undefined, url: string | undefined, color: string, mode: Mode, ctx: RenderCtx, o: { center?: boolean; big?: boolean } = {}): string {
-  const a = `<a${href(url, mode)} style="display:inline-block;padding:${o.big ? "14px 40px" : "10px 20px"};border-radius:6px;color:${ON};font-family:${FONT};font-size:${o.big ? 16 : 14}px;line-height:1.45;font-weight:600;text-decoration:none;background:${color}">${inline(label, mode, ctx)}</a>`;
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${o.center ? ' align="center" style="margin:0 auto"' : ""}><tr><td bgcolor="${color}" style="background:${color};border-radius:6px">${a}</td></tr></table>`;
+/** The colour of text on a button: the person's choice if they made one, else light or dark, whichever reads better. */
+export const buttonTextColor = (brand: string, f?: Fmt): string => f?.col ?? readableOn(brand);
+
+function buttonHtml(label: string | undefined, url: string | undefined, color: string, mode: Mode, ctx: RenderCtx, o: { center?: boolean; big?: boolean; f?: Fmt } = {}): string {
+  const f = o.f;
+  const a = `<a${href(url, mode)} style="display:inline-block;padding:${o.big ? "14px 40px" : "10px 20px"};border-radius:6px;color:${buttonTextColor(color, f)};font-family:${FONT};font-size:${o.big ? 16 : 14}px;line-height:1.45;font-weight:${f?.b ? 700 : 600};${f?.i ? "font-style:italic;" : ""}text-decoration:none;background:${color}">${inline(label, mode, ctx)}</a>`;
+  const al = f?.al ?? (o.center ? "center" : "left");
+  const place = al === "center" ? ' align="center" style="margin:0 auto"' : al === "right" ? ' align="right" style="margin-left:auto"' : "";
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${place}><tr><td bgcolor="${color}" style="background:${color};border-radius:6px">${a}</td></tr></table>`;
 }
 
 const dividerHtml = () => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="sv-rule" height="1" style="height:1px;font-size:1px;line-height:1px;border-top:1px solid ${RULE}">&nbsp;</td></tr></table>`;
 
-function footerHtml(text: string | undefined, mode: Mode, ctx: RenderCtx): string {
+function footerHtml(text: string | undefined, mode: Mode, ctx: RenderCtx, f?: Fmt): string {
+  const own = f?.col ? `color:${f.col};` : "";
   const link = mode === "final"
-    ? `<a href="${UNSUBSCRIBE_TOKEN}" class="sv-mute" style="color:${MUTED};text-decoration:underline">Unsubscribe</a>`
+    ? `<a href="${UNSUBSCRIBE_TOKEN}"${withClass("sv-mute", f)} style="color:${MUTED};text-decoration:underline;${own}">Unsubscribe</a>`
     : `<span style="text-decoration:underline">Unsubscribe</span>`;
-  return `<div class="sv-mute" style="text-align:center;font-family:${FONT};font-size:12px;line-height:1.45;color:${MUTED}">${inline(text, mode, ctx)}<br>${link}</div>`;
+  return `<div${withClass("sv-mute", f)} style="text-align:center;font-family:${FONT};font-size:12px;line-height:1.45;color:${MUTED};${fmtCss(f)}">${inline(text, mode, ctx)}<br>${link}</div>`;
 }
 
 function countdownHtml(date: string | undefined, color: string, mode: Mode, ctx: RenderCtx): string {
@@ -437,7 +512,7 @@ function countdownHtml(date: string | undefined, color: string, mode: Mode, ctx:
   const parts = mode === "edit" ? countdownParts(d, ctx.tz, ctx.now ?? Date.now()) : null;
   const tile = (unit: "days" | "hours" | "mins", label: string) => {
     const n = parts ? String(parts[unit]) : `[[sv-cd:${unit}:${d}]]`;
-    return `<td align="center" style="padding:0 5px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="76" align="center" bgcolor="${color}" style="width:76px;background:${color};color:${ON};border-radius:8px;padding:10px 0;font-family:${FONT}"><div style="font-size:24px;line-height:1.3;font-weight:700">${n}</div><div style="font-size:11px;line-height:1.3;opacity:.85">${label}</div></td></tr></table></td>`;
+    return `<td align="center" style="padding:0 5px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="76" align="center" bgcolor="${color}" style="width:76px;background:${color};color:${readableOn(color)};border-radius:8px;padding:10px 0;font-family:${FONT}"><div style="font-size:24px;line-height:1.3;font-weight:700">${n}</div><div style="font-size:11px;line-height:1.3;opacity:.85">${label}</div></td></tr></table></td>`;
   };
   return `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto"><tr>${tile("days", "Days")}${tile("hours", "Hours")}${tile("mins", "Mins")}</tr></table>`;
 }
@@ -456,7 +531,7 @@ function productsHtml(products: Product[], mode: Mode, ctx: RenderCtx): string {
       (x.p ? `<div class="sv-mute" style="font-family:${FONT};font-size:14px;line-height:1.45;color:${MUTED}">${inline(x.p, mode, ctx)}</div>` : "") +
       `${close}</td>`;
   }).join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 -6px;width:calc(100% + 12px)"><tr>${cells}</tr></table>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cells}</tr></table>`;
 }
 
 function socialHtml(links: SocialLink[] | undefined, color: string, mode: Mode): string {
@@ -464,40 +539,77 @@ function socialHtml(links: SocialLink[] | undefined, color: string, mode: Mode):
     const linked = mode === "final" && isValidLink(x.u);
     const tag = linked ? "a" : "span";
     const dim = mode === "edit" && !isValidLink(x.u) ? "opacity:.45;" : "";
-    return `<${tag}${href(x.u, mode)} aria-label="${escapeHtml(x.n)}" style="display:inline-block;width:30px;height:30px;line-height:30px;border-radius:50%;background:${color};color:${ON};font-family:${FONT};font-size:11px;font-weight:700;text-align:center;margin:0 4px;text-decoration:none;${dim}">${escapeHtml(x.n)}</${tag}>`;
+    return `<${tag}${href(x.u, mode)} aria-label="${escapeHtml(x.n)}" style="display:inline-block;width:30px;height:30px;line-height:30px;border-radius:50%;background:${color};color:${readableOn(color)};font-family:${FONT};font-size:11px;font-weight:700;text-align:center;margin:0 4px;text-decoration:none;${dim}">${escapeHtml(x.n)}</${tag}>`;
   }).join("");
   return `<div style="text-align:center">${items}</div>`;
 }
 
 function columnsHtml(b: EmailBlock, mode: Mode, ctx: RenderCtx): string {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>` +
-    `<td class="sv-col" width="50%" valign="top" style="padding-right:8px">${paragraphHtml(b.x, mode, ctx)}</td>` +
-    `<td class="sv-col" width="50%" valign="top" style="padding-left:8px">${paragraphHtml(b.y, mode, ctx)}</td></tr></table>`;
+    `<td class="sv-col" width="50%" valign="top" style="padding-right:8px">${paragraphHtml(b.x, mode, ctx, false, b.f)}</td>` +
+    `<td class="sv-col" width="50%" valign="top" style="padding-left:8px">${paragraphHtml(b.y, mode, ctx, false, b.f)}</td></tr></table>`;
 }
 
+/** Width of the email's content area in pixels (600 minus the 28 px padding on each side). */
+const CONTENT_W = 544;
+
+const imageLink = (inner: string, link: string | undefined, mode: Mode) =>
+  mode === "final" && isValidLink(link) ? `<a href="${escapeHtml(String(link).trim())}" style="text-decoration:none">${inner}</a>` : inner;
+
 function imageHtml(b: EmailBlock, mode: Mode): string {
+  const w = b.w === 75 || b.w === 50 ? b.w : 100;
+  const px = Math.round((CONTENT_W * w) / 100);
+  let inner: string;
   if (b.url) {
-    const img = `<img src="${escapeHtml(b.url)}" alt="${escapeHtml(b.alt ?? "")}" width="544" style="display:block;width:100%;max-width:544px;height:auto;border:0;border-radius:6px">`;
-    return b.link && mode === "final" && isValidLink(b.link) ? `<a href="${escapeHtml(b.link.trim())}">${img}</a>` : img;
+    inner = `<img src="${escapeHtml(b.url)}" alt="${escapeHtml(b.alt ?? "")}" width="${px}" style="display:block;width:100%;max-width:${px}px;height:auto;border:0;border-radius:6px">`;
+  } else {
+    const g = gradient(b.g ?? 0);
+    inner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle" height="170" bgcolor="${g.from}" style="height:170px;border-radius:6px;background-color:${g.from};background-image:${g.css};color:${ON};font-family:${FONT};font-size:14px;font-weight:600">Image</td></tr></table>`;
   }
-  const g = gradient(b.g ?? 0);
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle" height="170" bgcolor="${g.from}" style="height:170px;border-radius:6px;background-color:${g.from};background-image:${g.css};color:${ON};font-family:${FONT};font-size:14px;font-weight:600">Image</td></tr></table>`;
+  // A table (not margins or flex) keeps the picture centred when it is narrower than the email.
+  return `<table role="presentation" width="${w}%" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto"><tr><td>${imageLink(inner, b.link, mode)}</td></tr></table>`;
+}
+
+/**
+ * Several pictures side by side: 2 or 3 per row, in a table of fixed-width cells (no flexbox or grid, which
+ * mail clients ignore). The pictures are cropped to squares when they are uploaded, so rows stay even.
+ */
+function galleryHtml(b: EmailBlock, mode: Mode): string {
+  const n = b.cols === 3 ? 3 : 2;
+  const all = b.imgs ?? [];
+  const list = mode === "final" ? all.filter((x) => x.url) : all;
+  if (!list.length) return mode === "edit" ? ph("Add images to this grid") : "";
+  const px = Math.floor((CONTENT_W - 8 * n) / n);
+  const cell = (x: GalleryImage | undefined, i: number): string => {
+    if (!x) return `<td width="${Math.floor(100 / n)}%" style="padding:0 4px 8px">&nbsp;</td>`;
+    let inner: string;
+    if (x.url) inner = `<img src="${escapeHtml(x.url)}" alt="${escapeHtml(x.alt)}" width="${px}" height="${px}" style="display:block;width:100%;max-width:${px}px;height:auto;border:0;border-radius:6px">`;
+    else {
+      const g = gradient(i);
+      inner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle" height="${px}" bgcolor="${g.from}" style="height:${px}px;border-radius:6px;background-color:${g.from};background-image:${g.css};color:${ON};font-family:${FONT};font-size:13px;font-weight:600">Image ${i + 1}</td></tr></table>`;
+    }
+    return `<td width="${Math.floor(100 / n)}%" valign="top" style="padding:0 4px 8px">${imageLink(inner, x.link, mode)}</td>`;
+  };
+  const rows: string[] = [];
+  for (let i = 0; i < list.length; i += n) rows.push(`<tr>${Array.from({ length: n }, (_, k) => cell(list[i + k], i + k)).join("")}</tr>`);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows.join("")}</table>`;
 }
 
 function blockHtml(b: EmailBlock, d: Design, ctx: RenderCtx, mode: Mode): string {
   switch (b.t) {
     case "logo": return logoHtml(ctx, mode);
     case "banner": return bannerHtml(d, mode);
-    case "heading": return headingHtml(b.x, mode, ctx);
-    case "text": return paragraphHtml(b.x, mode, ctx);
+    case "heading": return headingHtml(b.x, mode, ctx, { f: b.f });
+    case "text": return paragraphHtml(b.x, mode, ctx, false, b.f);
     case "image": return imageHtml(b, mode);
+    case "gallery": return galleryHtml(b, mode);
     case "columns": return columnsHtml(b, mode, ctx);
     case "products": return productsHtml(b.p ?? [], mode, ctx);
     case "countdown": return countdownHtml(b.d, d.color, mode, ctx);
     case "social": return socialHtml(b.soc, d.color, mode);
-    case "button": return buttonHtml(b.x, b.u, d.color, mode, ctx);
+    case "button": return buttonHtml(b.x, b.u, d.color, mode, ctx, { f: b.f });
     case "divider": return dividerHtml();
-    case "footer": return footerHtml(b.x, mode, ctx);
+    case "footer": return footerHtml(b.x, mode, ctx, b.f);
   }
 }
 
@@ -516,10 +628,10 @@ export function layoutRows(d: Design, ctx: RenderCtx, mode: Mode): Row[] {
   const S = (slot: SlotKey, html: string, extra: Partial<Row> = {}): Row[] =>
     html ? [{ key: slot, slot, html, cond: slot === "footer" ? "" : d.cond[slot] ?? "", pad: PAD, ...extra }] : [];
   const lg = logoHtml(ctx, mode), bn = bannerHtml(d, mode);
-  const hd = (size?: number, c = true) => headingHtml(C.headline, mode, ctx, { center: c, size });
-  const bd = (c = true) => paragraphHtml(C.body, mode, ctx, c);
-  const bt = (o: { center?: boolean; big?: boolean }) => buttonHtml(C.btn, C.u, color, mode, ctx, o);
-  const ft = footerHtml(C.foot, mode, ctx);
+  const hd = (size?: number, c = true) => headingHtml(C.headline, mode, ctx, { center: c, size, f: d.fmt.headline });
+  const bd = (c = true) => paragraphHtml(C.body, mode, ctx, c, d.fmt.body);
+  const bt = (o: { center?: boolean; big?: boolean }) => buttonHtml(C.btn, C.u, color, mode, ctx, { ...o, f: d.fmt.button });
+  const ft = footerHtml(C.foot, mode, ctx, d.fmt.footer);
   const rule: Row = { key: "rule", html: dividerHtml(), cond: "", pad: "4px 28px" };
   switch (d.tpl) {
     case "event": return [...S("logo", lg), ...S("banner", bn), ...S("headline", hd()), ...S("countdown", countdownHtml(C.d, color, mode, ctx)), ...S("body", bd()), ...S("button", bt(center)), ...S("footer", ft)];
@@ -650,10 +762,45 @@ export type CheckInput = {
   logo: Logo;
   variables: VariableDef[];
   extraTexts?: string[];
-  audience: { chosen: boolean; name: string; size: number | null };
+  /** `skipped`: typed or pasted addresses that were left out (invalid, duplicate, or not allowed), known only to the editor. */
+  audience: { chosen: boolean; name: string; size: number | null; skipped?: { invalid: number; duplicates: number; left: number } };
   sender: { ok: boolean; label: string; problem: string | null };
   addressSet: boolean;
 };
+
+const isUploaded = (src: string) => Boolean(src) && !/^g[0-5]$/.test(src);
+
+/** Pictures that are in the email and have no description for screen readers (an empty description is a choice only if the picture is decorative; we ask). */
+export function imagesMissingAlt(d: Design): { count: number; sel?: string; slot?: SlotKey } {
+  let count = 0;
+  let sel: string | undefined;
+  let slot: SlotKey | undefined;
+  const note = (id?: string, sl?: SlotKey) => { count++; if (!sel && !slot) { sel = id; slot = sl; } };
+  const bannerShown = d.tpl === "custom" ? d.blocks.some((b) => b.t === "banner") : d.tpl !== "product";
+  if (bannerShown && isUploaded(d.banner.src) && !d.banner.alt.trim()) {
+    if (d.tpl === "custom") note(d.blocks.find((b) => b.t === "banner")?.id); else note(undefined, "banner");
+  }
+  if (d.tpl === "custom") {
+    for (const b of d.blocks) {
+      if (b.t === "image" && b.url && !(b.alt ?? "").trim()) note(b.id);
+      if (b.t === "gallery") for (const x of b.imgs ?? []) if (x.url && !x.alt.trim()) note(b.id);
+    }
+  }
+  return { count, sel, slot };
+}
+
+/** Button text colours the person chose that are hard to read on the brand colour (below WCAG AA for text). */
+export function lowContrastButtons(d: Design): { count: number; sel?: string; slot?: SlotKey } {
+  let count = 0;
+  let sel: string | undefined;
+  let slot: SlotKey | undefined;
+  const test = (f: Fmt | undefined, id?: string, sl?: SlotKey) => {
+    if (f?.col && contrastRatio(d.color, f.col) < MIN_TEXT_CONTRAST) { count++; if (!sel && !slot) { sel = id; slot = sl; } }
+  };
+  if (d.tpl === "custom") for (const b of d.blocks) { if (b.t === "button") test(b.f, b.id); }
+  else test(d.fmt.button, undefined, "button");
+  return { count, sel, slot };
+}
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
@@ -675,6 +822,11 @@ export function reviewChecks(i: CheckInput): Check[] {
     audit.malformed.length ? `Can’t read ${audit.malformed.join(", ")}` : "",
   ].filter(Boolean).join(". ");
 
+  const alt = imagesMissingAlt(d);
+  const contrast = lowContrastButtons(d);
+  const sk = i.audience.skipped;
+  const skippedTotal = sk ? sk.invalid + sk.duplicates + sk.left : 0;
+
   const out: Check[] = [
     { key: "subject", ok: Boolean(i.subject.trim()), title: "Subject is filled in", fix: "Add a subject", go: "setup", focus: "subject", problem: "add a subject line" },
     { key: "sender", ok: i.sender.ok, title: i.sender.ok ? "Sender is ready" : "Sender isn’t ready", detail: i.sender.ok ? i.sender.label : i.sender.problem ?? "Choose who this email comes from.", fix: "Choose sender", go: "setup", focus: "sender", problem: i.sender.problem ? i.sender.problem.charAt(0).toLowerCase() + i.sender.problem.slice(1).replace(/\.$/, "") : "choose a sender" },
@@ -686,6 +838,12 @@ export function reviewChecks(i: CheckInput): Check[] {
     { key: "buttons", ok: !buttons.length, title: "Button links are set", detail: buttons.length ? `${buttons.length} ${buttons.length > 1 ? "buttons have" : "button has"} no valid link (https:// or mailto:)` : "", fix: "Add link", tab: "edit", go: "content", sel: buttons[0]?.sel, slot: buttons[0]?.slot, problem: "add a valid link (https:// or mailto:) to every button" },
   ];
   if (unlinked) out.push({ key: "products", ok: true, warn: true, title: "Some products have no link", detail: `${unlinked} ${unlinked > 1 ? "products won’t" : "product won’t"} be clickable` });
+  if (alt.count) out.push({ key: "alt", ok: true, warn: true, title: "Images without alt text", detail: `${alt.count} ${alt.count > 1 ? "images have" : "image has"} no description for screen readers`, tab: "edit", go: "content", sel: alt.sel, slot: alt.slot });
+  if (contrast.count) out.push({ key: "contrast", ok: true, warn: true, title: "Button text is hard to read", detail: `${contrast.count} ${contrast.count > 1 ? "buttons use" : "button uses"} a text colour with low contrast on the brand colour`, tab: "edit", go: "content", sel: contrast.sel, slot: contrast.slot });
+  if (skippedTotal) {
+    const parts = [sk!.invalid ? `${sk!.invalid} invalid` : "", sk!.duplicates ? `${sk!.duplicates} duplicate` : "", sk!.left ? `${sk!.left} not allowed` : ""].filter(Boolean);
+    out.push({ key: "skipped", ok: true, warn: true, title: "Some addresses were skipped", detail: parts.join(", ") });
+  }
   return out;
 }
 
@@ -698,13 +856,19 @@ export function planTemplateSwitch(d: Design): Plan {
   const pk = (t: BlockType) => d.blocks.find((b) => b.t === t);
   const o = { H: pk("heading"), X: pk("text"), Bt: pk("button"), F: pk("footer"), Lg: pk("logo"), Im: pk("image") ?? pk("banner") };
   const used = new Set(Object.values(o).filter(Boolean));
-  const keep = ([["H", "Heading"], ["X", "Text"], ["Bt", "Button and link"], ["F", "Footer"], ["Lg", "Logo"], ["Im", "Image"]] as const).filter(([k]) => o[k]).map(([, label]) => label);
+  const keep: string[] = ([["H", "Heading"], ["X", "Text"], ["Bt", "Button and link"], ["F", "Footer"], ["Lg", "Logo"], ["Im", "Image"]] as const).filter(([k]) => o[k]).map(([, label]) => label);
+  const kept = [o.H, o.X, o.Bt, o.F].filter((b): b is EmailBlock => Boolean(b));
+  if (kept.some((b) => hasFmt(b.f))) keep.push("Text formatting");
+  if (kept.some((b) => b.cond)) keep.push("Who sees each part");
   return { ...o, aside: d.blocks.filter((b) => !used.has(b)), keep };
 }
 
 /** What carries over when a template turns into a custom layout. */
 export function customizeCarryOver(d: Design): string[] {
-  return ["Headline", "Body text", "Button label and link", "Footer", "Logo"].concat(d.banner.src ? ["Banner"] : [], d.tpl === "event" ? ["Countdown date"] : [], d.tpl === "product" ? ["Products"] : []);
+  return ["Headline", "Body text", "Button label and link", "Footer", "Logo"].concat(
+    d.banner.src ? ["Banner"] : [], d.tpl === "event" ? ["Countdown date"] : [], d.tpl === "product" ? ["Products"] : [],
+    FMT_SLOTS.some((k) => hasFmt(d.fmt[k])) ? ["Text formatting"] : [], Object.values(d.cond).some(Boolean) ? ["Who sees each part"] : [],
+  );
 }
 
 export function switchLayout(d: Design, k: Layout): Design {
@@ -713,15 +877,20 @@ export function switchLayout(d: Design, k: Layout): Design {
   if (d.tpl === "custom") {
     const o = planTemplateSwitch(n);
     const C = n.C;
-    if (o.H) { C.headline = o.H.x ?? ""; n.cond.headline = o.H.cond ?? ""; }
-    if (o.X) { C.body = o.X.x ?? ""; n.cond.body = o.X.cond ?? ""; }
-    if (o.Bt) { C.btn = o.Bt.x ?? ""; C.u = o.Bt.u ?? ""; n.cond.button = o.Bt.cond ?? ""; }
-    if (o.F) C.foot = o.F.x ?? "";
-    if (o.Im && o.Im.t === "image" && !n.banner.src) n.banner.src = `g${o.Im.g ?? 0}`;
+    const setFmt = (k: FmtSlot, f: Fmt | undefined) => { if (hasFmt(f)) n.fmt[k] = { ...f }; else delete n.fmt[k]; };
+    if (o.H) { C.headline = o.H.x ?? ""; n.cond.headline = o.H.cond ?? ""; setFmt("headline", o.H.f); }
+    if (o.X) { C.body = o.X.x ?? ""; n.cond.body = o.X.cond ?? ""; setFmt("body", o.X.f); }
+    if (o.Bt) { C.btn = o.Bt.x ?? ""; C.u = o.Bt.u ?? ""; n.cond.button = o.Bt.cond ?? ""; setFmt("button", o.Bt.f); }
+    if (o.F) { C.foot = o.F.x ?? ""; setFmt("footer", o.F.f); }
+    if (o.Im && o.Im.t === "image" && !n.banner.src) {
+      // An uploaded picture becomes the banner; a preset stays a preset.
+      if (o.Im.url) { n.banner.src = o.Im.url; n.banner.alt = o.Im.alt ?? ""; } else n.banner.src = `g${o.Im.g ?? 0}`;
+    }
     n.tray = o.aside;
   }
   if (k === "custom") {
     const C = n.C;
+    const fmtOf = (f: Fmt | undefined): Partial<EmailBlock> => (hasFmt(f) ? { f: { ...f } } : {});
     const mk = (t: BlockType, extra: Partial<EmailBlock> = {}): EmailBlock => {
       const b: EmailBlock = { id: newId(), t, ...extra };
       if (!b.cond) delete b.cond;
@@ -730,13 +899,13 @@ export function switchLayout(d: Design, k: Layout): Design {
     n.blocks = [
       mk("logo"),
       ...(n.banner.src ? [mk("banner")] : []),
-      mk("heading", { x: C.headline, cond: n.cond.headline }),
+      mk("heading", { x: C.headline, cond: n.cond.headline, ...fmtOf(n.fmt.headline) }),
       ...(d.tpl === "event" ? [mk("countdown", { d: C.d })] : []),
       ...(d.tpl === "product" ? [mk("products", { p: cloneJson(C.p) })] : []),
-      mk("text", { x: C.body, cond: n.cond.body }),
-      mk("button", { x: C.btn, u: C.u, cond: n.cond.button }),
+      mk("text", { x: C.body, cond: n.cond.body, ...fmtOf(n.fmt.body) }),
+      mk("button", { x: C.btn, u: C.u, cond: n.cond.button, ...fmtOf(n.fmt.button) }),
       ...n.tray,
-      mk("footer", { x: C.foot }),
+      mk("footer", { x: C.foot, ...fmtOf(n.fmt.footer) }),
     ];
     n.tray = [];
   }
@@ -750,6 +919,7 @@ export function newBlock(t: BlockType, d: Design): EmailBlock {
   const b: EmailBlock = { id: newId(), t };
   if (text[t] !== undefined) b.x = text[t];
   if (t === "image") b.g = 0;
+  if (t === "gallery") { b.cols = 2; b.imgs = [blankGalleryImage(), blankGalleryImage()]; }
   if (t === "columns") { b.x = "Left column text."; b.y = "Right column text."; }
   if (t === "countdown") b.d = d.C.d;
   if (t === "social") b.soc = ["IG", "X", "FB", "YT"].map((n) => ({ n, u: "" }));

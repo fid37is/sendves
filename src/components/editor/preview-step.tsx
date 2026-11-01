@@ -56,7 +56,7 @@ export function PreviewStep(p: Props) {
             ))}
           </div>
         ) : (
-          <div className={cn("w-[640px] max-w-full transition-[width] duration-200", p.device === "mob" && "w-[375px]")}>
+          <div className={cn("max-w-full transition-[width] duration-200", p.device === "mob" ? "w-[375px]" : "w-[640px]")}>
             <Subject v={p.single} preheader={p.preheader} className="mx-0 max-w-none" />
             <MailFrame doc={p.single.doc} title="Email preview" />
           </div>

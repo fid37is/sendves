@@ -1,13 +1,13 @@
 import { can } from "@/lib/access";
 import { getContext } from "@/lib/workspace";
-import { MAX_ASSET_BYTES, uploadEmailAsset } from "@/server/email-assets";
+import { ASSET_KINDS, MAX_ASSET_BYTES, uploadEmailAsset, type AssetKind } from "@/server/email-assets";
 
 export const dynamic = "force-dynamic";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 /**
- * Stores the logo or banner picked in the campaign editor and returns its address.
+ * Stores a picture picked in the campaign editor (logo, banner, an Image block or an Image grid) and returns its address.
  * The browser has already scaled the picture down; the file is checked again here.
  */
 export async function POST(req: Request) {
@@ -18,7 +18,8 @@ export async function POST(req: Request) {
   let form: FormData;
   try { form = await req.formData(); } catch { return json({ ok: false, error: "That upload couldn’t be read." }, 400); }
   const file = form.get("file");
-  const kind = form.get("kind") === "logo" ? "logo" : form.get("kind") === "banner" ? "banner" : null;
+  const wanted = String(form.get("kind") ?? "");
+  const kind = (ASSET_KINDS as readonly string[]).includes(wanted) ? (wanted as AssetKind) : null;
   if (!(file instanceof File) || !kind) return json({ ok: false, error: "Choose a picture." }, 400);
   if (file.size > MAX_ASSET_BYTES) return json({ ok: false, error: "That picture is larger than 2 MB." }, 413);
 

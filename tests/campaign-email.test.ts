@@ -88,13 +88,13 @@ test("zones: Lagos is UTC+1, so 09:00 there is 08:00 UTC", () => {
 
 test("sanitizeDesign drops what the browser must not send", () => {
   const d = sanitizeDesign({
-    tpl: "nope", color: "#123456",
+    tpl: "nope", color: "javascript:red",
     banner: { src: "https://evil.example/pixel.gif", fx: 500, fy: -5, alt: "x" },
     blocks: [{ id: "a", t: "text", x: "ok" }, { id: "a", t: "html", x: "<script>" }, { id: "a", t: "heading", x: "dup id" }, { t: "image", url: "javascript:alert(1)" }],
     cond: { headline: "everyone-but-me", body: "lagos" },
   }, rule);
   assert.equal(d.tpl, "announcement");
-  assert.equal(d.color, "#0F766E");
+  assert.equal(d.color, "#164e63", "anything that isn't #rrggbb falls back to the default colour");
   assert.equal(d.banner.src, "");
   assert.deepEqual([d.banner.fx, d.banner.fy], [100, 0]);
   assert.equal(d.blocks.length, 3);
@@ -104,6 +104,9 @@ test("sanitizeDesign drops what the browser must not send", () => {
   const ok = sanitizeDesign({ banner: { src: `${rule.prefix}b.jpg` } }, rule);
   assert.equal(ok.banner.src, `${rule.prefix}b.jpg`);
   assert.equal(sanitizeDesign({ banner: { src: "g3" } }, rule).banner.src, "g3");
+  assert.equal(sanitizeDesign({ color: "#123456" }, rule).color, "#123456", "any #rrggbb colour is allowed");
+  assert.equal(sanitizeDesign({ color: "#ABCDEF" }, rule).color, "#abcdef");
+  assert.equal(sanitizeDesign({ color: "#12345" }, rule).color, "#164e63");
 });
 
 test("sanitizeLogo only accepts this workspace's uploads", () => {

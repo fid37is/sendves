@@ -24,7 +24,7 @@ import {
   cancelCampaignAction, deleteCampaignAction, pauseCampaignAction, resumeCampaignAction,
   autosaveCampaignAction, previewContactsAction, sendTestAction, submitCampaignAction,
 } from "../actions";
-import { audienceSizeAction } from "../audience-actions";
+import { audienceSizeAction, pasteAudienceAction } from "../audience-actions";
 
 export const metadata: Metadata = { title: "Campaign" };
 
@@ -70,7 +70,8 @@ export default async function CampaignPage({ params }: { params: { id: string };
           contactFieldKeys={contactFieldKeys}
           workspace={{ name: ctx!.workspace!.name, business_address: ctx!.workspace!.business_address, timezone: ctx!.workspace!.timezone || "UTC" }}
           canSend={can(access, "campaigns.send")}
-          actions={{ autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, previewContacts: previewContactsAction, audienceSize: audienceSizeAction }}
+          canAddContacts={can(access, "contacts.manage")}
+          actions={{ autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, previewContacts: previewContactsAction, audienceSize: audienceSizeAction, pasteAudience: pasteAudienceAction }}
         />
       </>
     );

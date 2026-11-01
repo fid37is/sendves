@@ -60,10 +60,10 @@ const HEIGHT = { xs: "h-8", sm: "h-9", md: "h-10" } as const;
 type Size = { size?: keyof typeof HEIGHT };
 
 /** Compact form fields for the editor (the shared ones are sized for full-page forms). */
-export function TextInput({ size = "sm", className, ...p }: InputHTMLAttributes<HTMLInputElement> & Size) {
+export function TextInput({ size = "sm", className, ...p }: Omit<InputHTMLAttributes<HTMLInputElement>, "size"> & Size) {
   return <input className={cn(field, HEIGHT[size], className)} {...p} />;
 }
-export function SelectBox({ size = "sm", className, ...p }: SelectHTMLAttributes<HTMLSelectElement> & Size) {
+export function SelectBox({ size = "sm", className, ...p }: Omit<SelectHTMLAttributes<HTMLSelectElement>, "size"> & Size) {
   return <select className={cn(field, HEIGHT[size], className)} {...p} />;
 }
 export function TextArea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAreaElement>) {

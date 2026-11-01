@@ -9,18 +9,20 @@ import {
   EXTRA_EDITOR_BLOCKS, newBlock, prettyKey, reviewChecks, scanContent, scheduleInstant, SCHEDULE_ZONES, switchLayout, TEMPLATE_NAMES,
   type BlockType, type Check, type ContactLike, type Design, type Layout, type Logo, type SlotKey, type Step, type Tab,
 } from "@/lib/email/campaign";
+import { parsePastedContacts } from "@/lib/validation/paste-contacts";
 import { buildCampaignDoc } from "@/lib/email/campaign-preview";
 import { previewSubject } from "@/lib/email/preview";
 import type { AudienceOption, SenderRow } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import type { EditorPayload, PreviewContact, SaveResult, SubmitInput, SubmitResult, TestResult } from "@/app/(dashboard)/app/campaigns/actions";
+import type { IngestResult } from "@/server/audience";
 import { Canvas } from "@/components/editor/canvas";
 import { ReviewDialog, ScheduleDialog, SwitchDialog, type ScheduleValues, type SendOutcome } from "@/components/editor/dialogs";
 import { prepareImage, uploadImage } from "@/components/editor/image";
 import { PreviewStep } from "@/components/editor/preview-step";
 import { SidePanel } from "@/components/editor/side-panel";
 import { SetupStep, senderProblem } from "@/components/editor/setup-step";
-import { NO_CONTACT, type AudienceState, type Doc } from "@/components/editor/types";
+import { NO_CONTACT, type AudienceState, type Doc, type UploadTarget } from "@/components/editor/types";
 
 export type EditorCampaign = {
   id: string;
@@ -43,12 +45,15 @@ type Props = {
   contactFieldKeys: string[];
   workspace: { name: string; business_address: string | null; timezone: string };
   canSend: boolean;
+  /** May add new people to the workspace's contacts (typed or pasted addresses become contacts). */
+  canAddContacts: boolean;
   actions: {
     autosave: (p: EditorPayload) => Promise<SaveResult>;
     test: (p: EditorPayload) => Promise<TestResult>;
     submit: (p: SubmitInput) => Promise<SubmitResult>;
     previewContacts: (selection: unknown) => Promise<PreviewContact[]>;
     audienceSize: (selection: unknown) => Promise<{ ok: true; size: number } | { ok: false; error: string }>;
+    pasteAudience: (input: { text: string; consent: boolean }) => Promise<IngestResult>;
   };
 };
 
@@ -108,9 +113,12 @@ export function CampaignEditor(props: Props) {
     const last = history.current.pop();
     setHistoryLength(history.current.length);
     if (!last) return;
-    setDoc(JSON.parse(last) as Doc);
+    const back = JSON.parse(last) as Doc;
+    const was = docRef.current.design.tpl;
+    setDoc(back);
     setSel(null);
     setSlot(null);
+    if (back.design.tpl !== was) toast.info(`Back to ${back.design.tpl === "custom" ? "Custom layout" : `${TEMPLATE_NAMES[back.design.tpl]} template`}`);
   };
 
   // ── Variables ──
@@ -153,8 +161,39 @@ export function CampaignEditor(props: Props) {
     else if (v === "keep") setAudience(legacy);
     else setAudience({ mode: "custom", listIds: [], contacts: [] });
   };
-  const audienceName = audienceOptions.find((o) => o.value === audienceValue)?.label ?? "";
-  const chosen = audienceValue !== "";
+  // "From a list" or "Type or paste". People who were picked one by one in an earlier version show as typed or pasted.
+  const [audMode, setAudMode] = useState<"list" | "paste">(() => (campaign.audience.mode === "custom" && campaign.audience.contacts.length > 0 && campaign.audience.listIds.length === 0 ? "paste" : "list"));
+  const [pasteText, setPasteText] = useState("");
+  const [consent, setConsent] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [pasteReport, setPasteReport] = useState<IngestResult | null>(null);
+  const pasteParse = useMemo(() => parsePastedContacts(pasteText), [pasteText]);
+  const onAudMode = (m: "list" | "paste") => {
+    if (m === audMode) return;
+    setAudMode(m);
+    // The people chosen by hand don't carry into a list audience, so the choice is never half of each.
+    if (m === "list" && audience.contacts.length > 0) setAudience({ mode: "custom", listIds: [], contacts: [] });
+  };
+  const addPasted = async () => {
+    if (adding) return;
+    setAdding(true);
+    try {
+      const r = await actions.pasteAudience({ text: pasteText, consent });
+      setPasteReport(r);
+      if (r.contacts.length) {
+        setAudience((cur) => {
+          const have = new Set(cur.contacts.map((c) => c.id));
+          return { mode: "custom", listIds: [], contacts: [...cur.contacts, ...r.contacts.filter((c) => !have.has(c.id)).map((c) => ({ id: c.id, email: c.email, name: c.name }))] };
+        });
+        setPasteText("");
+      }
+      if (!r.ok && r.error) toast.error(r.error); else if (r.message) toast.success(r.message);
+    } catch { toast.error("Couldn’t reach the server. Check your connection and try again."); }
+    finally { setAdding(false); }
+  };
+  const clearPasted = () => { setAudience({ mode: "custom", listIds: [], contacts: [] }); setPasteReport(null); };
+  const audienceName = audMode === "paste" ? "Typed or pasted list" : audienceOptions.find((o) => o.value === audienceValue)?.label ?? "";
+  const chosen = audMode === "paste" ? audience.contacts.length > 0 : audienceValue !== "";
   const selection = useMemo(() => ({ mode: audience.mode, listIds: audience.listIds, contactIds: audience.contacts.map((c) => c.id) }), [audience]);
   const selectionKey = JSON.stringify(selection);
   const estimate = audienceValue === "all" ? props.totalSubscribed : audienceValue.startsWith("list:") ? lists.find((l) => l.id === audience.listIds[0])?.subscribed ?? null : null;
@@ -168,7 +207,7 @@ export function CampaignEditor(props: Props) {
     }, 250);
     return () => { live = false; clearTimeout(t); };
   }, [selectionKey, chosen, actions]);
-  const reach: number | null = chosen ? serverSize ?? estimate : 0;
+  const reach: number | null = chosen ? serverSize ?? (audMode === "paste" ? audience.contacts.length : estimate) : 0;
 
   // ── Saving ──
   const payload: EditorPayload = useMemo(() => ({
@@ -253,7 +292,7 @@ export function CampaignEditor(props: Props) {
     const b = design.blocks.find((x) => x.id === id);
     if (!b) return;
     setSel(id); setSlot(null); setPend(null); setOpen(true);
-    setTab(b.x !== undefined || EXTRA_EDITOR_BLOCKS.has(b.t) || b.t === "logo" || b.t === "banner" ? "edit" : b.t === "image" ? "media" : "blocks");
+    setTab(b.x !== undefined || EXTRA_EDITOR_BLOCKS.has(b.t) || b.t === "logo" || b.t === "banner" ? "edit" : "blocks");
   };
   const selectSlot = (k: SlotKey) => { setSlot(k); setSel(null); setOpen(true); setTab("edit"); };
   const openPanel = (t: Tab) => { setTab(t); setOpen(true); };
@@ -325,24 +364,38 @@ export function CampaignEditor(props: Props) {
       mutate((d) => ({ ...d, design: { ...d.design, blocks: d.design.blocks.map((b) => (b.id === id ? { ...b, x: join(b.x ?? "") } : b)) } }), false);
     } else { toast.info("Select a text block first"); return; }
     toast.success(`Inserted ${labels[key] ?? key}`);
+    mclose();
   };
 
   // ── Pictures ──
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const fileKind = useRef<"logo" | "banner">("logo");
+  const target = useRef<UploadTarget>({ kind: "logo" });
   const [uploading, setUploading] = useState(false);
-  const pickImage = (kind: "logo" | "banner") => { fileKind.current = kind; fileInput.current?.click(); };
+  const pickImage = (t: UploadTarget) => { target.current = t; fileInput.current?.click(); };
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    const kind = fileKind.current;
+    const t = target.current;
     setUploading(true);
     try {
-      const img = await prepareImage(file, kind);
-      const url = await uploadImage(img.blob, kind);
-      if (kind === "logo") mutate((d) => ({ ...d, logo: { ...d.logo, src: url, w: img.w, h: img.h } }));
-      else mutate((d) => ({ ...d, design: { ...d.design, banner: { ...d.design.banner, src: url, fx: 50, fy: 50 } } }));
+      const img = await prepareImage(file, t.kind);
+      const url = await uploadImage(img.blob, t.kind);
+      if (t.kind === "logo") mutate((d) => ({ ...d, logo: { ...d.logo, src: url, w: img.w, h: img.h } }));
+      else if (t.kind === "banner") mutate((d) => ({ ...d, design: { ...d.design, banner: { ...d.design.banner, src: url, fx: 50, fy: 50 } } }));
+      else if (t.kind === "grid") {
+        const { blockId, index } = t;
+        mutate((d) => ({ ...d, design: { ...d.design, blocks: d.design.blocks.map((b) => (b.id === blockId ? { ...b, imgs: (b.imgs ?? []).map((x, i) => (i === index ? { ...x, url } : x)) } : b)) } }));
+      } else if (t.blockId) {
+        const { blockId } = t;
+        mutate((d) => ({ ...d, design: { ...d.design, blocks: d.design.blocks.map((b) => (b.id === blockId ? { ...b, url } : b)) } }));
+      } else {
+        // "Upload a new image": adds an Image block that holds this picture.
+        const b = newBlock("image", design);
+        b.url = url;
+        insertBlock(b);
+        mclose();
+      }
     } catch (err) {
       toast.error((err as Error).message || "Couldn’t add that picture.");
     } finally {
@@ -391,10 +444,13 @@ export function CampaignEditor(props: Props) {
   const problem = senderProblem(props.senders, senderId);
   const checks: Check[] = useMemo(() => reviewChecks({
     subject, design, logo: doc.logo, variables, extraTexts: [subject, preheader],
-    audience: { chosen, name: audienceName, size: chosen ? reach : 0 },
+    audience: {
+      chosen, name: audienceName, size: chosen ? reach : 0,
+      skipped: audMode === "paste" && pasteReport ? { invalid: pasteReport.invalid, duplicates: pasteReport.duplicates, left: pasteReport.skippedCount } : undefined,
+    },
     sender: { ok: !problem, label: sender ? `${sender.fromName} <${sender.email}>` : "", problem },
     addressSet: Boolean(workspace.business_address?.trim()),
-  }), [subject, preheader, design, doc.logo, variables, chosen, audienceName, reach, problem, sender, workspace.business_address]);
+  }), [subject, preheader, design, doc.logo, variables, chosen, audienceName, reach, problem, sender, workspace.business_address, audMode, pasteReport]);
   const scan = useMemo(() => scanContent(subject, preheader, design), [subject, preheader, design]);
 
   const [review, setReview] = useState<{ mode: "now" | "sched" } | null>(null);
@@ -429,7 +485,7 @@ export function CampaignEditor(props: Props) {
   const fix = async (c: Check) => {
     if (c.href) { if (await saveNow()) router.push(c.href); return; }
     setReview(null);
-    if (c.go === "setup") { setStep("setup"); focusLater(c.focus === "aud" ? "aud" : c.focus === "sender" ? "fromMail" : "subject"); return; }
+    if (c.go === "setup") { setStep("setup"); focusLater(c.focus === "aud" ? (audMode === "paste" ? "audText" : "aud") : c.focus === "sender" ? "fromMail" : "subject"); return; }
     setStep("content");
     if (c.sel) { setSel(c.sel); setSlot(null); }
     else if (c.slot) { setSlot(c.slot); setSel(null); }
@@ -507,6 +563,11 @@ export function CampaignEditor(props: Props) {
         <SetupStep
           senders={props.senders} senderId={senderId} onSender={setSenderId}
           audienceValue={audienceValue} audienceOptions={audienceOptions} onAudience={onAudience} reach={reach}
+          audMode={audMode} onAudMode={onAudMode}
+          paste={{
+            text: pasteText, onText: setPasteText, parse: pasteParse, consent, onConsent: setConsent, needsConsent: props.canAddContacts,
+            adding, onAdd: addPasted, report: pasteReport, picked: audience.contacts.length, onClear: clearPasted,
+          }}
           subject={subject} onSubject={setSubject} preheader={preheader} onPreheader={setPreheader}
           onNext={() => setStep("content")}
         />
@@ -516,10 +577,10 @@ export function CampaignEditor(props: Props) {
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex flex-wrap items-center gap-2 px-4 pb-1 pt-3">
+              <div className="flex flex-nowrap items-center gap-2 px-4 pb-1 pt-3">
                 <Button size="sm" variant="outline" disabled={historyLength === 0} onClick={undo}>Undo</Button>
                 <Button size="sm" variant="outline" onClick={() => openPanel(custom ? "blocks" : "tpl")}>{custom ? "Add content" : "Change template"}</Button>
-                <span className="flex-1" />
+                <span className="min-w-0 flex-1" />
                 <Button size="sm" variant="outline" loading={testing} onClick={sendTest}>Send test</Button>
               </div>
               <div className="mx-auto mb-2 mt-1 rounded-full border border-mist bg-white px-3 py-0.5 text-xs text-ink-muted">
@@ -536,7 +597,7 @@ export function CampaignEditor(props: Props) {
               open={open} tab={tab} setTab={setTab} onClose={() => setOpen(false)}
               design={design} logo={doc.logo} selBlock={selBlock} slot={slot}
               mutate={mutate} addBlock={addBlock} askLayout={askLayout}
-              pickImage={pickImage} uploading={uploading}
+              pickImage={pickImage} uploading={uploading} afterPick={mclose}
               variables={variableList} fallbacks={fallbacks} setFallback={setFallback} insertVariable={insertVariable}
               pickPreset={pickPreset}
             />
@@ -569,7 +630,7 @@ export function CampaignEditor(props: Props) {
           single={preview.single} compare={preview.compare} preheader={preheader}
           contacts={[...contacts.map((c) => ({ id: c.id, label: contactLabel(c) })), { id: NO_CONTACT, label: "No contact data (fallbacks)" }]}
           contactId={contactId}
-          onContact={(id) => { pickedNone.current = id === NO_CONTACT; setContactId(id); }}
+          onContact={(id) => { pickedNone.current = id === NO_CONTACT; setContactId(id); setComparing(false); }}
           comparing={comparing} onCompare={() => setComparing((c) => !c)}
           device={device} onDevice={setDevice} dark={dark} onDark={() => setDark((d) => !d)}
           onBack={() => setStep("content")}

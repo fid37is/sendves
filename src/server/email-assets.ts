@@ -24,7 +24,10 @@ export function sniffImage(bytes: Uint8Array): { type: string; ext: string } | n
 }
 
 /** Stores a picture in the workspace's folder and returns its public address. */
-export async function uploadEmailAsset(db: Db, workspaceId: string, kind: "logo" | "banner", bytes: Uint8Array): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+export const ASSET_KINDS = ["logo", "banner", "image", "grid"] as const;
+export type AssetKind = (typeof ASSET_KINDS)[number];
+
+export async function uploadEmailAsset(db: Db, workspaceId: string, kind: AssetKind, bytes: Uint8Array): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   if (bytes.byteLength === 0) return { ok: false, error: "That file is empty." };
   if (bytes.byteLength > MAX_ASSET_BYTES) return { ok: false, error: "That picture is larger than 2 MB." };
   const kindOf = sniffImage(bytes);
