@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   BLOCK_LABELS, customizeCarryOver, planTemplateSwitch, SCHEDULE_ZONES, TEMPLATE_NAMES,
@@ -44,6 +44,32 @@ export function ScheduleDialog({ open, onClose, onContinue }: { open: boolean; o
       <div className="mt-5 flex justify-end gap-2">
         <Button size="sm" variant="outline" onClick={onClose}>Cancel</Button>
         <Button size="sm" onClick={() => onContinue({ date, time, zone })}>Continue to review</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Saving as a template ────────────────────────────────────────────────────
+
+/** Asks for a name, then keeps the email's layout and content as a template. */
+export function SaveTemplateDialog({ open, defaultName, saving, error, onClose, onSave }: {
+  open: boolean; defaultName: string; saving: boolean; error: string | null; onClose: () => void; onSave: (name: string, description: string) => void;
+}) {
+  const [name, setName] = useState(defaultName);
+  const [description, setDescription] = useState("");
+  useEffect(() => { if (open) { setName(defaultName); setDescription(""); } }, [open, defaultName]);
+  return (
+    <Modal open={open} onClose={onClose} label="Save as template" closable={!saving}>
+      <Title>Save as template</Title>
+      <p className="text-ink-soft">Keeps the layout, content, colours and pictures. New campaigns made from it start exactly like this.</p>
+      <Lbl htmlFor="tplName">Template name</Lbl>
+      <TextInput id="tplName" size="md" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} />
+      <Lbl htmlFor="tplDesc">Short description (optional)</Lbl>
+      <TextInput id="tplDesc" size="md" value={description} maxLength={200} placeholder="When to use it" onChange={(e) => setDescription(e.target.value)} />
+      {error ? <p className="mt-2 text-xs font-medium text-danger" role="alert">{error}</p> : null}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button size="sm" variant="outline" disabled={saving} onClick={onClose}>Cancel</Button>
+        <Button size="sm" loading={saving} disabled={!name.trim()} onClick={() => onSave(name.trim(), description.trim())}>Save template</Button>
       </div>
     </Modal>
   );

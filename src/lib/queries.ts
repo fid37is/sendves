@@ -10,7 +10,6 @@ import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 import { requireAdminDb } from "@/lib/auth/admin";
 import { dnsRecordsFor } from "@/server/sending/domains";
 import { limitsFor } from "@/config/plan-limits";
-import { DEFAULT_SETTINGS, type Settings } from "@/server/abuse";
 import { getDailyActivity, getTopLinks, pct, ratio, sumDays, type RangeDays } from "@/lib/analytics";
 import { sanitizeBlocks } from "@/lib/email/sanitize";
 import type { Block } from "@/lib/email/blocks";
@@ -200,11 +199,13 @@ export async function getAudienceOptions(ctx: Ctx): Promise<{ lists: AudienceOpt
   return { lists: withCounts, totalSubscribed: total ?? 0 };
 }
 
-export type TemplateRow = { id: string; name: string; description: string; subject: string; preview_text: string; blocks: Block[]; variables: VariableDef[]; departmentId: string | null; updated: string };
-const TEMPLATE_COLUMNS = "id, name, description, subject, preview_text, blocks, variables, department_id, updated_at";
+export type TemplateRow = { id: string; name: string; description: string; subject: string; preview_text: string; blocks: Block[]; variables: VariableDef[]; departmentId: string | null; updated: string;
+  /** Set when the template was saved from the campaign editor; its layout is then edited there. */
+  design: unknown | null };
+const TEMPLATE_COLUMNS = "id, name, description, subject, preview_text, blocks, variables, department_id, updated_at, design";
 const toTemplate = (t: any): TemplateRow => ({
   id: t.id, name: t.name, description: t.description ?? "", subject: t.subject ?? "", preview_text: t.preview_text ?? "",
-  blocks: sanitizeBlocks(t.blocks), variables: sanitizeVariables(t.variables), departmentId: t.department_id ?? null, updated: fmt(t.updated_at),
+  blocks: sanitizeBlocks(t.blocks), variables: sanitizeVariables(t.variables), departmentId: t.department_id ?? null, updated: fmt(t.updated_at), design: t.design ?? null,
 });
 
 /** The workspace's own templates, most recently edited first. */
@@ -268,82 +269,6 @@ export async function getCampaignDetail(ctx: Ctx, id: string) {
     },
     links, series,
   };
-}
-
-export type RecipientRow = {
-  id: string; email: string; status: string; error: string; sentAt: string | null;
-  opened: boolean; clicked: number; unsubscribed: boolean;
-};
-export const RECIPIENT_FILTERS = ["all", "delivered", "opened", "clicked", "bounced", "failed", "complained", "queued"] as const;
-export type RecipientFilter = (typeof RECIPIENT_FILTERS)[number];
-export const RECIPIENT_PAGE = 25;
-
-/**
- * What happened to each person a campaign was sent to, one page at a time. Open / click / unsubscribe
- * come from the events table; delivery state and the failure reason come from the send itself.
- * The caller must already have loaded the campaign through getCampaignDetail (which checks access).
- */
-export async function getCampaignRecipients(ctx: Ctx, campaignId: string, opts: { filter?: string; q?: string; page?: number } = {}) {
-  const empty = { rows: [] as RecipientRow[], total: 0, page: 1, pages: 1 };
-  if (!ctx.db || !ctx.workspace) return empty;
-  const filter = (RECIPIENT_FILTERS as readonly string[]).includes(opts.filter ?? "") ? (opts.filter as RecipientFilter) : "all";
-  const page = Math.max(1, Math.floor(opts.page ?? 1) || 1);
-  const term = (opts.q ?? "").replace(/[^\p{L}\p{N}@.+_\- ]/gu, "").trim().slice(0, 80);
-
-  // Opened / clicked are about events, so resolve those filters to a list of send ids first.
-  let restrictIds: string[] | null = null;
-  if (filter === "opened" || filter === "clicked") {
-    const { data } = await ctx.db.from("events").select("send_id").eq("campaign_id", campaignId).eq("type", filter === "opened" ? "open" : "click").limit(5000);
-    restrictIds = Array.from(new Set<string>(((data ?? []) as any[]).map((e) => String(e.send_id ?? "")).filter(Boolean)));
-    if (!restrictIds.length) return empty;
-  }
-
-  let query = ctx.db.from("sends").select("id, email, status, last_error, sent_at, created_at", { count: "exact" })
-    .eq("campaign_id", campaignId).eq("workspace_id", ctx.workspace.id)
-    .order("sent_at", { ascending: false, nullsFirst: false }).order("email").range((page - 1) * RECIPIENT_PAGE, page * RECIPIENT_PAGE - 1);
-  if (restrictIds) query = query.in("id", restrictIds);
-  else if (filter === "queued") query = query.in("status", ["queued", "sending"]);
-  else if (filter !== "all") query = query.eq("status", filter);
-  if (term) query = query.ilike("email", `%${term}%`);
-  const { data, count } = await query;
-  const sends = (data ?? []) as any[];
-  const ids = sends.map((r) => r.id as string);
-  const { data: ev } = ids.length ? await ctx.db.from("events").select("send_id, type").in("send_id", ids).in("type", ["open", "click", "unsubscribe"]) : { data: [] as any[] };
-  const opened = new Set<string>(); const unsub = new Set<string>(); const clicks = new Map<string, number>();
-  for (const e of (ev ?? []) as any[]) {
-    if (e.type === "open") opened.add(e.send_id);
-    else if (e.type === "unsubscribe") unsub.add(e.send_id);
-    else clicks.set(e.send_id, (clicks.get(e.send_id) ?? 0) + 1);
-  }
-  const total = count ?? 0;
-  return {
-    rows: sends.map((r): RecipientRow => ({
-      id: r.id, email: r.email, status: r.status, error: (r.last_error as string) ?? "", sentAt: r.sent_at ?? null,
-      opened: opened.has(r.id), clicked: clicks.get(r.id) ?? 0, unsubscribed: unsub.has(r.id),
-    })),
-    total, page, pages: Math.max(1, Math.ceil(total / RECIPIENT_PAGE)),
-  };
-}
-
-/** Where a campaign is in its send (queued / skipped) and why sends failed, grouped by reason. */
-export async function getCampaignDelivery(ctx: Ctx, campaignId: string) {
-  const none = { queued: 0, skipped: 0, total: 0, failures: [] as { reason: string; count: number }[] };
-  if (!ctx.db || !ctx.workspace) return none;
-  const count = async (statuses: string[]) => {
-    const { count: n } = await ctx.db!.from("sends").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId).in("status", statuses);
-    return n ?? 0;
-  };
-  const [queued, skipped, total, { data: bad }] = await Promise.all([
-    count(["queued", "sending"]), count(["skipped"]),
-    ctx.db.from("sends").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId).then((r) => r.count ?? 0),
-    ctx.db.from("sends").select("last_error").eq("campaign_id", campaignId).in("status", ["failed", "bounced"]).not("last_error", "is", null).limit(2000),
-  ]);
-  const by = new Map<string, number>();
-  for (const r of (bad ?? []) as any[]) {
-    const reason = String(r.last_error).replace(/\s+/g, " ").trim().slice(0, 160);
-    if (reason) by.set(reason, (by.get(reason) ?? 0) + 1);
-  }
-  return { queued, skipped, total, failures: [...by.entries()].map(([reason, n]) => ({ reason, count: n })).sort((a, b) => b.count - a.count).slice(0, 6) };
 }
 
 /**
@@ -606,10 +531,6 @@ export async function getAdminWorkspaces(opts: { q?: string; status?: string } =
   const owners = [...new Set((ws ?? []).map((w: any) => w.owner_id))];
   const { data: profiles } = owners.length ? await db.from("profiles").select("id, email").in("id", owners) : { data: [] as any[] };
   const { data: stats } = await db.from("workspace_stats_30d").select("*");
-  const wsIds = (ws ?? []).map((w: any) => w.id as string);
-  const { data: memberRows } = wsIds.length ? await db.from("workspace_members").select("workspace_id").in("workspace_id", wsIds) : { data: [] as any[] };
-  const memberCount = new Map<string, number>();
-  for (const m of (memberRows ?? []) as any[]) memberCount.set(m.workspace_id, (memberCount.get(m.workspace_id) ?? 0) + 1);
   const email = new Map((profiles ?? []).map((p: any) => [p.id, p.email]));
   const st = new Map((stats ?? []).map((s: any) => [s.workspace_id, s]));
   return (ws ?? []).map((w: any) => {
@@ -618,7 +539,7 @@ export async function getAdminWorkspaces(opts: { q?: string; status?: string } =
     return {
       id: w.id as string, name: w.name as string, owner: (email.get(w.owner_id) as string) ?? "-",
       plan: w.plan.charAt(0).toUpperCase() + w.plan.slice(1), status: w.status as WorkspaceStatus, created: fmt(w.created_at),
-      members: memberCount.get(w.id) ?? 0, dailyLimit: Number(w.daily_send_limit), sent30d: sent, complaints30d: Number(s?.complaints_30d ?? 0),
+      dailyLimit: Number(w.daily_send_limit), sent30d: sent, complaints30d: Number(s?.complaints_30d ?? 0),
       complaintRate: sent ? `${((Number(s.complaints_30d) / sent) * 100).toFixed(2)}%` : "-",
     };
   });
@@ -641,153 +562,10 @@ export async function getAdminAnalytics(days: RangeDays) {
   };
 }
 
-const sinceText = (iso?: string | null) => {
-  if (!iso) return "Never";
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 2) return "Just now";
-  if (mins < 60) return `${mins} min ago`;
-  if (mins < 60 * 24) return `${Math.floor(mins / 60)} hr ago`;
-  if (mins < 60 * 24 * 30) return `${Math.floor(mins / 1440)} d ago`;
-  return fmt(iso);
-};
-
-export type AdminUserRow = {
-  id: string; name: string; email: string; role: string; joined: string; lastSeen: string; confirmed: boolean;
-  workspaces: { id: string; name: string; role: string; status: WorkspaceStatus }[];
-};
-
-/** Sign-in details live in the auth schema, not in profiles. Best effort: the list still works without them. */
-async function authInfo(db: Awaited<ReturnType<typeof requireAdminDb>>["db"], ids: Set<string>) {
-  const out = new Map<string, { lastSignIn: string | null; confirmed: boolean }>();
-  try {
-    for (let page = 1; page <= 5 && out.size < ids.size; page++) {
-      const { data } = await db.auth.admin.listUsers({ page, perPage: 200 });
-      const users = data?.users ?? [];
-      for (const u of users) out.set(u.id, { lastSignIn: u.last_sign_in_at ?? null, confirmed: Boolean(u.email_confirmed_at) });
-      if (users.length < 200) break;
-    }
-  } catch { /* leave the sign-in columns empty */ }
-  return out;
-}
-
-export async function getAdminUsers(opts: { q?: string; role?: string } = {}) {
+export async function getAdminUsers() {
   const { db } = await requireAdminDb();
-  let query = db.from("profiles").select("id, full_name, email, role, created_at").order("created_at", { ascending: false }).limit(200);
-  if (opts.role === "admin" || opts.role === "user") query = query.eq("role", opts.role);
-  const term = (opts.q ?? "").replace(/[^\p{L}\p{N}@.+_\- ]/gu, "").trim().slice(0, 80);
-  if (term) query = query.or(`email.ilike.%${term}%,full_name.ilike.%${term}%`);
-  const { data } = await query;
-  const profiles = (data ?? []) as any[];
-  const ids = profiles.map((u) => u.id as string);
-  const [{ data: members }, auth, { count: total }, { count: admins }] = await Promise.all([
-    ids.length ? db.from("workspace_members").select("user_id, role, workspaces(id, name, status)").in("user_id", ids) : Promise.resolve({ data: [] as any[] }),
-    authInfo(db, new Set(ids)),
-    db.from("profiles").select("id", { count: "exact", head: true }),
-    db.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin"),
-  ]);
-  const byUser = new Map<string, AdminUserRow["workspaces"]>();
-  for (const m of (members ?? []) as any[]) {
-    if (!m.workspaces) continue;
-    const list = byUser.get(m.user_id) ?? [];
-    list.push({ id: m.workspaces.id, name: m.workspaces.name, role: m.role, status: m.workspaces.status });
-    byUser.set(m.user_id, list);
-  }
-  const users: AdminUserRow[] = profiles.map((u) => ({
-    id: u.id, name: (u.full_name as string) || "-", email: (u.email as string) || "-", role: u.role as string,
-    joined: fmt(u.created_at), lastSeen: sinceText(auth.get(u.id)?.lastSignIn), confirmed: auth.get(u.id)?.confirmed ?? true,
-    workspaces: byUser.get(u.id) ?? [],
-  }));
-  return { users, total: total ?? users.length, admins: admins ?? 0, noWorkspace: users.filter((u) => u.role !== "admin" && u.workspaces.length === 0).length };
-}
-
-export async function getAdminUserDetail(id: string) {
-  const { db } = await requireAdminDb();
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const { data: p } = await db.from("profiles").select("id, full_name, email, role, created_at").eq("id", id).maybeSingle();
-  if (!p) return null;
-  const [{ data: members }, auth, { data: audit }] = await Promise.all([
-    db.from("workspace_members").select("role, workspaces(id, name, status, plan, owner_id)").eq("user_id", id),
-    authInfo(db, new Set([id])),
-    db.from("audit_log").select("action, target_type, target_id, created_at").eq("actor_id", id).order("created_at", { ascending: false }).limit(10),
-  ]);
-  const info = auth.get(id);
-  let disabled = false;
-  try {
-    const { data: authUser } = await db.auth.admin.getUserById(id);
-    const until = (authUser?.user as { banned_until?: string | null } | undefined)?.banned_until;
-    disabled = Boolean(until && new Date(until).getTime() > Date.now());
-  } catch { /* leave as enabled */ }
-  return {
-    id: p.id as string, name: (p.full_name as string) || "-", email: (p.email as string) || "-", role: p.role as string,
-    disabled,
-    joined: fmt(p.created_at), lastSeen: sinceText(info?.lastSignIn), confirmed: info?.confirmed ?? true,
-    workspaces: ((members ?? []) as any[]).filter((m) => m.workspaces).map((m) => ({
-      id: m.workspaces.id as string, name: m.workspaces.name as string, status: m.workspaces.status as WorkspaceStatus,
-      plan: String(m.workspaces.plan), role: m.role as string, owns: m.workspaces.owner_id === id,
-    })),
-    activity: ((audit ?? []) as any[]).map((a) => ({ action: a.action as string, target: [a.target_type, a.target_id].filter(Boolean).join(" "), when: new Date(a.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) })),
-  };
-}
-
-/** Everything an admin needs to look after one customer organization. */
-export async function getAdminWorkspaceDetail(id: string) {
-  const { db } = await requireAdminDb();
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const { data: w } = await db.from("workspaces").select("*").eq("id", id).maybeSingle();
-  if (!w) return null;
-  const head = (table: string, f: (q: any) => any = (q) => q) => f(db.from(table).select("id", { count: "exact", head: true }).eq("workspace_id", id)).then((r: any) => (r.count ?? 0) as number);
-  const [
-    { data: members }, { data: owner }, { data: domains }, { data: senders }, { data: campaigns }, { data: stats }, { data: abuse }, { data: audit },
-    contacts, subscribed, lists, invites, series,
-  ] = await Promise.all([
-    db.from("workspace_members").select("user_id, role").eq("workspace_id", id),
-    db.from("profiles").select("id, full_name, email").eq("id", w.owner_id).maybeSingle(),
-    db.from("sending_domains").select("id, domain, status, dkim_ok, spf_ok, dmarc_ok, created_at").eq("workspace_id", id).order("created_at"),
-    db.from("sender_identities").select("id, email, status").eq("workspace_id", id),
-    db.from("campaigns").select("id, name, subject, status, review_status, recipient_count, created_at, started_at, completed_at").eq("workspace_id", id).neq("status", "draft").order("created_at", { ascending: false }).limit(10),
-    db.from("workspace_stats_30d").select("*").eq("workspace_id", id).maybeSingle(),
-    db.from("abuse_reports").select("id, reporter, reason, status, created_at").eq("workspace_id", id).order("created_at", { ascending: false }).limit(10),
-    db.from("audit_log").select("actor_email, action, meta, created_at").eq("target_id", id).order("created_at", { ascending: false }).limit(15),
-    head("contacts"), head("contacts", (q) => q.eq("status", "subscribed")), head("lists"), head("workspace_invites", (q) => q.eq("status", "pending")),
-    getDailyActivity(db, { days: 30, workspaceId: id }),
-  ]);
-  const userIds = (members ?? []).map((m: any) => m.user_id as string);
-  const { data: profs } = userIds.length ? await db.from("profiles").select("id, full_name, email").in("id", userIds) : { data: [] as any[] };
-  const pmap = new Map((profs ?? []).map((p: any) => [p.id, p]));
-  const campaignIds = (campaigns ?? []).map((c: any) => c.id as string);
-  const { data: cstats } = campaignIds.length ? await db.from("campaign_stats").select("campaign_id, sent, delivered, bounced, complained, clicks").in("campaign_id", campaignIds) : { data: [] as any[] };
-  const cs = new Map((cstats ?? []).map((r: any) => [r.campaign_id, r]));
-  const sent30 = Number(stats?.sent_30d ?? 0);
-  const complaints30 = Number(stats?.complaints_30d ?? 0);
-  const totals = series.reduce((t, d) => ({ delivered: t.delivered + d.delivered, bounced: t.bounced + d.bounced, opens: t.opens + d.opens, clicks: t.clicks + d.uniqueClicks }), { delivered: 0, bounced: 0, opens: 0, clicks: 0 });
-  return {
-    id: w.id as string, name: w.name as string, plan: String(w.plan), status: w.status as WorkspaceStatus, created: fmt(w.created_at),
-    timezone: (w.timezone as string) || "UTC", address: (w.business_address as string) || "", dailyLimit: Number(w.daily_send_limit), maxContacts: Number(w.max_contacts),
-    planLimits: limitsFor(String(w.plan)),
-    billing: { provider: (w.billing_provider as string | null) ?? null, ref: (w.billing_ref as string | null) ?? null },
-    owner: owner ? { id: owner.id as string, name: (owner.full_name as string) || "-", email: (owner.email as string) || "-" } : null,
-    members: ((members ?? []) as any[]).map((m) => {
-      const p: any = pmap.get(m.user_id);
-      return { id: m.user_id as string, name: (p?.full_name as string) || "-", email: (p?.email as string) || "-", role: m.role as string, owner: m.user_id === w.owner_id };
-    }).sort((a, b) => Number(b.owner) - Number(a.owner) || a.name.localeCompare(b.name)),
-    counts: { contacts, subscribed, lists, invites, senders: (senders ?? []).filter((x: any) => x.status === "active").length },
-    domains: ((domains ?? []) as any[]).map((d) => ({ id: d.id as string, domain: d.domain as string, status: d.status as string, dkim: !!d.dkim_ok, spf: !!d.spf_ok, dmarc: !!d.dmarc_ok, added: fmt(d.created_at) })),
-    campaigns: ((campaigns ?? []) as any[]).map((c) => {
-      const r: any = cs.get(c.id);
-      const sent = Number(r?.sent ?? 0);
-      return {
-        id: c.id as string, name: c.name as string, subject: c.subject as string, status: c.status as string, review: c.review_status as string,
-        recipients: Number(c.recipient_count ?? 0), sent, delivered: Number(r?.delivered ?? 0), bounced: Number(r?.bounced ?? 0), complained: Number(r?.complained ?? 0),
-        clickRate: pct(Number(r?.clicks ?? 0), sent), date: fmt(c.completed_at ?? c.started_at ?? c.created_at),
-      };
-    }),
-    activity: { sent30, complaints30, complaintRate: pct(complaints30, sent30, 2), bounceRate: pct(totals.bounced, sent30), deliveredRate: pct(totals.delivered, sent30), series, ...totals },
-    abuse: ((abuse ?? []) as any[]).map((a) => ({ id: a.id as string, reporter: a.reporter as string, reason: a.reason as string, status: a.status as string, received: fmt(a.created_at) })),
-    audit: ((audit ?? []) as any[]).map((a) => ({
-      actor: (a.actor_email as string) || "-", action: a.action as string, detail: a.meta && Object.keys(a.meta).length ? JSON.stringify(a.meta) : "",
-      when: new Date(a.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
-    })),
-  };
+  const { data } = await db.from("profiles").select("id, full_name, email, role, created_at").order("created_at", { ascending: false }).limit(200);
+  return (data ?? []).map((u: any) => ({ id: u.id as string, name: (u.full_name as string) || "-", email: (u.email as string) || "-", role: u.role as string, joined: fmt(u.created_at) }));
 }
 
 export async function getReviewQueue() {
@@ -821,6 +599,7 @@ export async function getAuditLog() {
 
 export async function getPlatformSettings() {
   const { db } = await requireAdminDb();
+  const fallback = { pause_bounce_pct: 5, pause_complaint_pct: 0.3, suspend_complaint_pct: 0.5, new_workspace_daily_limit: 200, new_workspace_max_contacts: 500 };
   const { data } = await db.from("platform_settings").select("*").eq("id", 1).maybeSingle();
-  return { ...DEFAULT_SETTINGS, ...(data ?? {}) } as Settings;
+  return { ...fallback, ...(data ?? {}) };
 }

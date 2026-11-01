@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { ActionButton } from "@/components/ui/submit-button";
+import { Button } from "@/components/ui/button";
 import { ConfirmSubmitButton } from "@/components/ui/confirm";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { PageToasts, type ToastKind } from "@/components/ui/toast";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageHeader, StatCard } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/badge";
-import { LinkTabs } from "@/components/ui/tabs";
-import { CampaignContent, CampaignPerformance, CampaignRecipients } from "@/components/dashboard/campaign-report";
+import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
+import { Funnel, TrendChart } from "@/components/charts/trend-chart";
 import { CampaignEditor } from "@/components/dashboard/campaign-editor";
-import { getAudienceOptions, getCampaignAudienceDetail, getCampaignDelivery, getCampaignDetail, getCampaignRecipients, getContactFieldKeys, getDomains, getSenderIdentities } from "@/lib/queries";
+import { pct } from "@/lib/analytics";
+import { getAudienceOptions, getCampaignAudienceDetail, getCampaignDetail, getContactFieldKeys, getDomains, getSenderIdentities } from "@/lib/queries";
 import { can } from "@/lib/access";
 import { designFromRow } from "@/lib/email/campaign";
 import { sanitizeBlocks } from "@/lib/email/sanitize";
@@ -24,10 +25,11 @@ import {
   autosaveCampaignAction, previewContactsAction, sendTestAction, submitCampaignAction,
 } from "../actions";
 import { audienceSizeAction, pasteAudienceAction } from "../audience-actions";
+import { saveCampaignAsTemplateAction } from "../../templates/actions";
 
 export const metadata: Metadata = { title: "Campaign" };
 
-export default async function CampaignPage({ params, searchParams }: { params: { id: string }; searchParams: SearchParams }) {
+export default async function CampaignPage({ params }: { params: { id: string }; searchParams: SearchParams }) {
   const ctx = await getContext();
   if (!can(ctx?.access, "campaigns.view")) return <NoAccess title="Campaign" what="campaigns" />;
   const access = ctx!.access!;
@@ -49,8 +51,8 @@ export default async function CampaignPage({ params, searchParams }: { params: {
       getEmailLogo(ctx!.db!, ctx!.workspace!.id),
     ]);
     const toasts: { id: string; kind: ToastKind; message: string }[] = [];
-    if (!domains.some((d) => d.ready)) toasts.push({ id: "no-domain", kind: "warning", message: "No sending domain is ready yet. DKIM, SPF and DMARC must pass under Sending domains first." });
-    else if (senders.length === 0) toasts.push({ id: "no-sender", kind: "warning", message: "You don’t have a work email yet. Set one under Team, then choose it as the sender." });
+    if (!domains.some((d) => d.ready)) toasts.push({ id: "no-domain", kind: "warning", message: "No sending domain is ready yet. DKIM, SPF and DMARC must pass under Sending domains before you can send." });
+    else if (senders.length === 0) toasts.push({ id: "no-sender", kind: "warning", message: "You don’t have a work email yet. Set one under Team (the owner can do this for you), then choose it as the sender." });
     return (
       <>
         <PageToasts toasts={toasts} />
@@ -70,7 +72,8 @@ export default async function CampaignPage({ params, searchParams }: { params: {
           workspace={{ name: ctx!.workspace!.name, business_address: ctx!.workspace!.business_address, timezone: ctx!.workspace!.timezone || "UTC" }}
           canSend={can(access, "campaigns.send")}
           canAddContacts={can(access, "contacts.manage")}
-          actions={{ autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, previewContacts: previewContactsAction, audienceSize: audienceSizeAction, pasteAudience: pasteAudienceAction }}
+          canSaveTemplate={can(access, "templates.manage")}
+          actions={{ autosave: autosaveCampaignAction, test: sendTestAction, submit: submitCampaignAction, previewContacts: previewContactsAction, audienceSize: audienceSizeAction, pasteAudience: pasteAudienceAction, saveTemplate: saveCampaignAsTemplateAction }}
         />
       </>
     );
@@ -80,22 +83,13 @@ export default async function CampaignPage({ params, searchParams }: { params: {
   const canPause = mayControl && c.status === "sending";
   const canResume = mayControl && c.status === "paused";
   const canCancel = mayControl && ["scheduled", "sending", "paused"].includes(c.status);
-  const tz = ctx!.workspace!.timezone || "UTC";
-  const base = `/app/campaigns/${c.id}`;
-  const tab = ["performance", "email", "recipients"].includes(searchParams.tab ?? "") ? (searchParams.tab as string) : "performance";
 
-  // One toast per page, as one clear sentence, instead of several stacked cards.
   const toasts: { id: string; kind: ToastKind; message: string }[] = [];
-  if (c.review_status === "rejected") toasts.push({ id: `rejected-${c.id}`, kind: "error", message: "This campaign wasn’t approved and was not sent. Contact support if this is a mistake." });
-  else if (c.status === "paused") toasts.push({ id: `paused-${c.id}`, kind: "warning", message: c.pause_reason ? `Sending is paused: ${c.pause_reason}` : "Sending is paused. A high bounce or complaint rate may have triggered it." });
-  else if (c.review_status === "pending") toasts.push({ id: `review-${c.id}`, kind: "info", message: "Waiting for review. New accounts have their first campaign checked before it sends." });
+  if (c.review_status === "pending") toasts.push({ id: `review-${c.id}`, kind: "info", message: "This campaign is waiting for review. New accounts have their first campaign checked before it sends." });
+  if (c.review_status === "rejected") toasts.push({ id: `rejected-${c.id}`, kind: "error", message: "This campaign was not approved. Contact support if you think this is a mistake." });
+  if (c.status === "paused") toasts.push({ id: `paused-${c.id}`, kind: "warning", message: c.pause_reason ? `Sending is paused: ${c.pause_reason}` : "Sending is paused. If this was automatic, a high bounce or complaint rate triggered it." });
 
-  const [delivery, recipients] = await Promise.all([
-    getCampaignDelivery(ctx!, c.id),
-    tab === "recipients"
-      ? getCampaignRecipients(ctx!, c.id, { filter: searchParams.filter, q: searchParams.q, page: Number(searchParams.page) || 1 })
-      : Promise.resolve(null),
-  ]);
+  const maxLinkClicks = Math.max(1, ...links.map((l) => l.clicks));
 
   return (
     <>
@@ -104,10 +98,10 @@ export default async function CampaignPage({ params, searchParams }: { params: {
         title={c.name}
         description={c.subject}
         action={
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-3">
             <StatusBadge status={c.status} />
-            {canPause ? <form action={pauseCampaignAction}><input type="hidden" name="id" value={c.id} /><ActionButton variant="outline" size="sm">Pause</ActionButton></form> : null}
-            {canResume ? <form action={resumeCampaignAction}><input type="hidden" name="id" value={c.id} /><ActionButton size="sm">Resume</ActionButton></form> : null}
+            {canPause ? <form action={pauseCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" variant="outline" size="sm">Pause</Button></form> : null}
+            {canResume ? <form action={resumeCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" size="sm">Resume</Button></form> : null}
             {canCancel ? (
               <ConfirmSubmitButton
                 action={cancelCampaignAction}
@@ -145,22 +139,60 @@ export default async function CampaignPage({ params, searchParams }: { params: {
         }
       />
 
-      <LinkTabs
-        active={tab}
-        tabs={[
-          { key: "performance", label: "Performance", href: base },
-          { key: "email", label: "Email", href: `${base}?tab=email` },
-          { key: "recipients", label: "Recipients", href: `${base}?tab=recipients`, count: formatNumber(Number(c.recipient_count ?? 0) || delivery.total) },
-        ]}
-      />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Clicked" value={pct(stats.clicks, stats.sent)} note={`${formatNumber(stats.clicks)} people · ${formatNumber(stats.totalClicks)} total clicks`} />
+        <StatCard label="Click-to-delivered" value={pct(stats.clicks, stats.delivered)} note="Unique clickers ÷ delivered" />
+        <StatCard label="Sent" value={formatNumber(stats.sent)} note={stats.failed ? `${stats.failed} failed · ${formatNumber(c.recipient_count)} recipients` : `${formatNumber(c.recipient_count)} recipients`} />
+        <StatCard label="Delivered" value={pct(stats.delivered, stats.sent)} />
+        <StatCard label="Opened" value={pct(stats.opens, stats.sent)} note="Unreliable: mail apps can hide opens" />
+        <StatCard label="Bounced" value={pct(stats.bounced, stats.sent)} />
+        <StatCard label="Unsubscribed" value={pct(stats.unsubscribes, stats.sent)} />
+        <StatCard label="Complaints" value={pct(stats.complained, stats.sent, 2)} />
+      </div>
 
-      {tab === "email" ? (
-        <CampaignContent c={c} tz={tz} />
-      ) : tab === "recipients" && recipients ? (
-        <CampaignRecipients base={base} tz={tz} {...recipients} filter={searchParams.filter ?? "all"} q={searchParams.q ?? ""} />
-      ) : (
-        <CampaignPerformance c={c} stats={stats} delivery={delivery} links={links} series={series} />
-      )}
+      <div className="mt-8 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <Card>
+          <CardHeader title="Clicks over time" description="Since this campaign started sending" />
+          <div className="p-6">
+            <TrendChart
+              ariaLabel="Clicks and unique clickers per day for this campaign"
+              dates={series.map((d) => d.date)}
+              series={[
+                { key: "clicks", label: "Clicks", tone: "brand", values: series.map((d) => d.clicks), area: true },
+                { key: "unique", label: "Unique clickers", tone: "accent", values: series.map((d) => d.uniqueClicks), dashed: true },
+              ]}
+            />
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Engagement funnel" />
+          <Funnel
+            stages={[
+              { label: "Sent", value: stats.sent },
+              { label: "Delivered", value: stats.delivered },
+              { label: "Clicked", value: stats.clicks, note: "Recipients who clicked at least once" },
+            ]}
+          />
+        </Card>
+      </div>
+
+      <Card className="mt-8">
+        <CardHeader title="Clicks by link" description="Which links people actually clicked." />
+        <Table>
+          <thead><tr><TH>Link</TH><TH>Share of clicks</TH><TH>Clicks</TH><TH>Unique</TH></tr></thead>
+          <tbody>
+            {links.map((l) => (
+              <tr key={l.url}>
+                <TD className="max-w-[360px] break-all">{l.url}</TD>
+                <TD className="w-48"><div className="h-2 rounded-full bg-accent-100"><div className="h-2 rounded-full bg-brand-700" style={{ width: `${(l.clicks / maxLinkClicks) * 100}%` }} /></div></TD>
+                <TD className="font-semibold text-ink">{formatNumber(l.clicks)}</TD>
+                <TD>{formatNumber(l.uniqueClicks)}</TD>
+              </tr>
+            ))}
+            {links.length === 0 ? <EmptyRow cols={4} message="No clicks recorded yet." /> : null}
+          </tbody>
+        </Table>
+      </Card>
     </>
   );
 }

@@ -24,9 +24,11 @@ type Props = {
   canUse?: boolean;
   /** May edit, duplicate and delete your own templates (template permission). */
   canManage?: boolean;
+  /** Opens in the older block editor. Templates saved from the campaign editor are changed there instead. */
+  editable?: boolean;
 };
 
-export function TemplateCard({ id, name, description, doc, own = false, canUse = true, canManage = true }: Props) {
+export function TemplateCard({ id, name, description, doc, own = false, canUse = true, canManage = true, editable = true }: Props) {
   return (
     <div className="overflow-hidden rounded-2xl border border-mist bg-white">
       <EmailThumb doc={doc} title={`${name} preview`} className="h-32" />
@@ -43,7 +45,7 @@ export function TemplateCard({ id, name, description, doc, own = false, canUse =
           ) : null}
           {own && canManage ? (
             <>
-              <ButtonLink href={`/app/templates/${id}`} variant="outline" size="sm">Edit</ButtonLink>
+              {editable ? <ButtonLink href={`/app/templates/${id}`} variant="outline" size="sm">Edit</ButtonLink> : null}
               <form action={duplicateTemplateAction}>
                 <input type="hidden" name="id" value={id} />
                 <Button type="submit" variant="ghost" size="sm" aria-label={`Duplicate ${name}`} title="Duplicate"><Copy className="h-4 w-4" aria-hidden="true" /></Button>

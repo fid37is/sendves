@@ -46,10 +46,10 @@ const STRIPE: Record<string, string> = {
 };
 
 /** A tiny picture of a template's layout. */
-export function LayoutThumb({ layout }: { layout: TemplateKey }) {
+export function LayoutThumb({ layout }: { layout: TemplateKey | "custom" }) {
   return (
     <div aria-hidden="true" className="flex w-[50px] flex-none flex-col gap-[3px] rounded border border-mist bg-white p-1">
-      {[...TEMPLATE_THUMBS[layout]].map((c, i) => <i key={i} className={cn("block h-[3px] rounded-[1px]", STRIPE[c])} />)}
+      {[...(layout === "custom" ? "lhtptBf" : TEMPLATE_THUMBS[layout])].map((c, i) => <i key={i} className={cn("block h-[3px] rounded-[1px]", STRIPE[c])} />)}
     </div>
   );
 }

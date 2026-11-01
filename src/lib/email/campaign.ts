@@ -316,16 +316,49 @@ export function designFromLegacyBlocks(old: LegacyBlock[], now = Date.now()): De
   return d;
 }
 
-/** The starting content of the built-in starters; any other starting point becomes a custom layout. */
+/**
+ * The built-in templates: exactly the layouts of the editor's "Change template" tab, each with starting
+ * content. The Templates page, the New campaign page and "Use template" all read this one list, so they
+ * can't drift from the editor. `blank` is the editor's custom layout.
+ */
+export type BuiltInTemplate = { id: TemplateKey | "blank"; name: string; description: string; subject: string; previewText: string };
+
+const STARTERS: Record<TemplateKey, { subject: string; previewText: string; C: Partial<Content> }> = {
+  announcement: {
+    subject: "Introducing something new", previewText: "We’ve just launched something we think you’ll like.",
+    C: { headline: "Introducing something new", body: "Hi {{first_name|there}}, we’ve just launched something we think you’ll like.\n\n• Faster: do more in less time\n• Simpler: fewer steps to get started\n• Better: built from your feedback", btn: "See what’s new", u: "https://example.com" },
+  },
+  newsletter: {
+    subject: "What’s new this month", previewText: "A quick update on what we’ve been working on.",
+    C: { headline: "What’s new this month", body: "Hi {{first_name|there}},\n\nHere’s a quick update on what we’ve been working on and what’s coming next.", btn: "Read the full story", u: "https://example.com" },
+  },
+  promo: {
+    subject: "A little something for you", previewText: "A limited-time offer, just for you.",
+    C: { headline: "A limited-time offer", body: "Hi {{first_name|there}}, for a short time you can enjoy a special offer on our best sellers.\n\nUse the button below to claim it before it ends.", btn: "Claim the offer", u: "https://example.com" },
+  },
+  event: {
+    subject: "You’re invited", previewText: "Save the date and RSVP.",
+    C: { headline: "You’re invited", body: "Hi {{first_name|there}},\n\nJoin us for an evening of conversation and connection.\n\nWhen: Saturday, 7:00 PM\nWhere: Add your venue here", btn: "RSVP now", u: "https://example.com" },
+  },
+  product: {
+    subject: "New this week", previewText: "Take a look at what’s new.",
+    C: { headline: "New this week", body: "Hi {{first_name|there}}, here are a few things we think you’ll like.", btn: "Shop all", u: "https://example.com" },
+  },
+};
+
+export const BUILT_IN_TEMPLATES: readonly BuiltInTemplate[] = [
+  { id: "blank", name: "Blank", description: "Start from an empty custom layout and add your own blocks", subject: "", previewText: "" },
+  ...TEMPLATE_KEYS.map((k): BuiltInTemplate => ({ id: k, name: TEMPLATE_NAMES[k], description: TEMPLATE_BLURBS[k], subject: STARTERS[k].subject, previewText: STARTERS[k].previewText })),
+];
+
+/** The design a built-in template starts with; null for any other id (a template of your own). */
 export function designFromStarter(id: string, now = Date.now()): Design | null {
-  const base = (tpl: TemplateKey, C: Partial<Content>): Design => { const d = defaultDesign(tpl, now); d.C = { ...d.C, ...C }; return d; };
-  switch (id) {
-    case "blank": return defaultDesign("custom", now);
-    case "newsletter": return base("newsletter", { headline: "What’s new this month", body: "Hi {{first_name|there}},\n\nHere’s a quick update on what we’ve been working on and what’s coming next.", btn: "Read the full story", u: "https://example.com" });
-    case "announcement": return base("announcement", { headline: "Introducing something new", body: "Hi {{first_name|there}}, we’ve just launched something we think you’ll like.\n\n• Faster: do more in less time\n• Simpler: fewer steps to get started\n• Better: built from your feedback", btn: "See what’s new", u: "https://example.com" });
-    case "event": return base("event", { headline: "You’re invited", body: "Hi {{first_name|there}},\n\nJoin us for an evening of conversation and connection.\n\nWhen: Saturday, 7:00 PM\nWhere: Add your venue here", btn: "RSVP now", u: "https://example.com" });
-    default: return null;
-  }
+  if (id === "blank") return defaultDesign("custom", now);
+  if (!(TEMPLATE_KEYS as readonly string[]).includes(id)) return null;
+  const k = id as TemplateKey;
+  const d = defaultDesign(k, now);
+  d.C = { ...d.C, ...STARTERS[k].C };
+  return d;
 }
 
 /** The design of a stored campaign: the saved design, or one made from its older blocks. */

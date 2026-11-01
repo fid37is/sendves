@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { canAccessDepartment, canAssignDepartment } from "@/lib/access";
 import { cloneBlocks, type Block } from "@/lib/email/blocks";
-import { designToBlocks, sanitizeDesign } from "@/lib/email/design";
-import { assetOkFor } from "@/server/brand";
+import { sanitizeDesign } from "@/lib/email/campaign";
+import { assetRule } from "@/server/email-assets";
 import { sanitizeBlocks } from "@/lib/email/sanitize";
 import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 import { go } from "@/lib/flash";
@@ -62,17 +62,19 @@ export async function startFromTemplateAction(formData: FormData) {
   go(`/app/campaigns/${id}`, "ok", `Campaign created from “${tpl.name}”. Check the details, choose your audience, then send.`);
 }
 
-/** “New template”: starts a small editable template and opens it. */
+/**
+ * “New template”: templates are built in the campaign editor, so this opens a blank draft there. Once the
+ * layout is ready, “Save as template” in the Templates tab keeps it (the draft can then be deleted).
+ */
 export async function createTemplateAction() {
-  const ctx = await requireWorkspace(BACK, "templates.manage");
+  const ctx = await requireWorkspace(BACK, ["templates.manage", "campaigns.manage"]);
   if ((await templateCount(ctx)) >= MAX_TEMPLATES) go(BACK, "err", `You can keep up to ${MAX_TEMPLATES} templates. Delete one you no longer use first.`);
-  const blocks = cloneBlocks([
-    { id: "h", type: "heading", text: "Your headline" },
-    { id: "t", type: "text", text: "Hi {{first_name|there}},\n\nWrite your message here." },
-  ]);
-  const id = await insertTemplate(ctx, { name: "Untitled template", blocks, department_id: await departmentFor(ctx, null) });
-  if (!id) go(BACK, "err", "Couldn’t create the template. Try again.");
-  go(editor(id), "ok", "Template created. Give it a name and build your layout.");
+  const tpl = await resolveTemplate(ctx.db, ctx.workspace.id, "blank", ctx.access);
+  if (!tpl) go(BACK, "err", "Couldn’t start a new template. Try again.");
+  const id = await createDraftFromTemplate(ctx, tpl, `New template · ${shortDate()}`);
+  if (!id) go(BACK, "err", "Couldn’t start a new template. Try again.");
+  revalidatePath("/app/campaigns");
+  go(`/app/campaigns/${id}`, "info", "Build your layout, then open the Templates tab and choose “Save as template”.");
 }
 
 /** Reads and saves the template editor form. Never redirects. */
@@ -160,15 +162,16 @@ export type SaveTemplateResult = { ok: true; id: string; name: string } | { ok: 
  * From the campaign editor: keeps the current layout as a template, without leaving the editor.
  * The template takes the campaign's own title; nothing else is asked.
  */
-export async function saveCampaignAsTemplateAction(input: { name: string; subject: string; previewText: string; design: unknown; variables?: unknown; departmentId?: string | null }): Promise<SaveTemplateResult> {
+export async function saveCampaignAsTemplateAction(input: { name: string; description?: string; subject: string; previewText: string; design: unknown; variables?: unknown; departmentId?: string | null }): Promise<SaveTemplateResult> {
   const ctx = await requireWorkspace("/app/campaigns", ["templates.manage", "campaigns.view"]);
-  const design = sanitizeDesign(input?.design, assetOkFor(ctx.workspace.id));
-  const blocks = designToBlocks(design);
+  // The editor's own model, checked again here: only this workspace's pictures, valid links and colours.
+  const design = sanitizeDesign(input?.design, assetRule(ctx.workspace.id));
   if (design.tpl === "custom" && design.blocks.length === 0) return { ok: false, error: "Add some content before saving it as a template." };
   if ((await templateCount(ctx)) >= MAX_TEMPLATES) return { ok: false, error: `You can keep up to ${MAX_TEMPLATES} templates. Delete one you no longer use first.` };
   const name = clean(input?.name, 120) || "Untitled template";
   const id = await insertTemplate(ctx, {
-    name, subject: clean(input?.subject, 200), preview_text: clean(input?.previewText, 200), blocks, design,
+    // The design is the template; `blocks` stays empty (it belongs to the older block editor).
+    name, description: clean(input?.description, 200), subject: clean(input?.subject, 200), preview_text: clean(input?.previewText, 200), blocks: [], design,
     variables: sanitizeVariables(input?.variables), department_id: await departmentFor(ctx, input?.departmentId),
   });
   if (!id) return { ok: false, error: "Couldn’t save the template. Try again." };
