@@ -1,5 +1,4 @@
 import "server-only";
-import { limitsFor } from "@/config/plan-limits";
 import { inScope } from "@/server/scope";
 import type { Access } from "@/lib/access";
 import type { Db } from "@/lib/supabase/admin";
@@ -170,7 +169,7 @@ export async function ingestContacts(
   }
 
   const { count } = await ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id);
-  let room = Math.max(0, Math.min(ctx.workspace.max_contacts, limitsFor(ctx.workspace.plan).contacts) - (count ?? 0));
+  let room = Math.max(0, ctx.workspace.max_contacts - (count ?? 0));
 
   const name = (a: string | null | undefined, b: string | null | undefined) => [a, b].filter(Boolean).join(" ");
   const toCreate: IngestRow[] = [];

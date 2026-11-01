@@ -132,14 +132,14 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
     try {
       const res = await action();
       if (!res.ok) {
-        toast.error(res.error ?? "Something went wrong. Try again.");
+        toast.error(res.error ?? "That didn’t work. Try again.");
         return false;
       }
       if (res.message) toast.success(res.message);
       setSelected(new Set());
       return true;
-    } catch {
-      toast.error("Something went wrong.");
+    } catch (e) {
+      toast.fail("That didn’t work. Try again.", e);
       return false;
     } finally {
       setBusy(false);

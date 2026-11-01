@@ -26,9 +26,13 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
 
   const bounceRate = ratio(s.bounced, s.sent);
   const complaintRate = ratio(s.complaints, s.sent);
+  // One toast for everything waiting on an admin, instead of several stacked cards.
   const toasts: { id: string; kind: ToastKind; message: string }[] = [];
-  if (o.alert) toasts.push({ id: `abuse-${o.alert}`, kind: "warning", message: `Open abuse case: ${o.alert}` });
-  if (s.pendingReview > 0) toasts.push({ id: `review-${s.pendingReview}`, kind: "info", message: `${s.pendingReview} campaign${s.pendingReview === 1 ? " is" : "s are"} waiting for review.` });
+  const waiting = [
+    o.alert ? `Open abuse case: ${o.alert}.` : "",
+    s.pendingReview > 0 ? `${s.pendingReview} campaign${s.pendingReview === 1 ? " is" : "s are"} waiting for review.` : "",
+  ].filter(Boolean);
+  if (waiting.length) toasts.push({ id: `attention-${o.alert}-${s.pendingReview}`, kind: o.alert ? "warning" : "info", message: waiting.join(" ") });
 
   const plans = Object.entries(s.plans).sort((a, b) => b[1] - a[1]);
 

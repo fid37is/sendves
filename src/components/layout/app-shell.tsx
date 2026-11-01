@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity, BarChart3, Ban, Building2, ClipboardCheck, CreditCard, Flag, Globe, History, Home, LayoutTemplate, LogOut, Menu,
-  AtSign, PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldCheck, Users, UsersRound, X, type LucideIcon,
+  AtSign, PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldCheck, UserCog, Users, UsersRound, X, type LucideIcon,
 } from "lucide-react";
 import { Logo, LogoMark } from "@/components/ui/logo";
 import { BackContext } from "@/components/layout/back-button";
@@ -15,7 +15,7 @@ import { cn, initials } from "@/lib/utils";
 const icons: Record<string, LucideIcon> = {
   home: Home, send: Send, users: Users, template: LayoutTemplate, globe: Globe, chart: BarChart3, card: CreditCard,
   settings: Settings, shield: ShieldCheck, flag: Flag, ban: Ban, building: Building2, review: ClipboardCheck,
-  activity: Activity, history: History, team: UsersRound, at: AtSign,
+  activity: Activity, history: History, team: UsersRound, at: AtSign, account: UserCog,
 };
 
 export type ShellNavItem = { label: string; href: string; icon: keyof typeof icons };

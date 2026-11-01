@@ -25,7 +25,7 @@ export function flash(kind: ToastKind, message: string) {
 
 const kinds = { ok: "success", err: "error", warn: "warning", info: "info" } as const;
 
-/** Redirects to a page and shows a toast there: ok = success, err = error, warn = warning, info = information. */
+/** Redirects to a page and shows a toast there: ok = success, err = error, warn = warning, info = information. One clear sentence. */
 export function go(path: string, kind: keyof typeof kinds, message: string): never {
   flash(kinds[kind], message);
   redirect(path);

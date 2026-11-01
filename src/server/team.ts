@@ -55,3 +55,15 @@ export async function sendRecoveryEmail(args: { to: string; loginEmail: string; 
   const text = `Reset the password for ${args.loginEmail}: ${args.link}\n\nIf you didn’t ask for this, ignore this email.`;
   return sendPlatformEmail(args.to, "Reset your Sendves password", html, text);
 }
+
+/** Emails a new platform admin a link to choose their password. Returns false (never throws) when it can't be sent. */
+export async function sendAdminInviteEmail(args: { to: string; name: string; inviter: string; link: string }): Promise<boolean> {
+  const html = shell(
+    `<h2 style="margin:0 0 12px;">You’re now a Sendves platform admin</h2>` +
+    `<p style="line-height:1.6;">${escapeHtml(args.inviter)} gave ${args.name ? escapeHtml(args.name) : "you"} access to the admin console. Choose a password with the button below, then sign in at <strong>${escapeHtml(env.adminUrl)}</strong>. You’ll be asked to set up an authenticator app the first time.</p>` +
+    button(args.link, "Choose your password") +
+    `<p style="font-size:13px;color:#475569;line-height:1.6;">This link works once and expires soon. If it has expired, ask another admin to send a new one. If you weren’t expecting this, ignore this email.</p>`,
+  );
+  const text = `${args.inviter} gave you access to the Sendves admin console.\n\nChoose your password: ${args.link}\nThen sign in at ${env.adminUrl} (you'll be asked to set up an authenticator app).\n\nThe link works once and expires soon. If it has expired, ask another admin to send a new one.`;
+  return sendPlatformEmail(args.to, "You’re now a Sendves platform admin", html, text);
+}

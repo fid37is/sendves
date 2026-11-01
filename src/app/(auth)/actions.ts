@@ -30,6 +30,12 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
   if (password !== confirm) return { error: "The passwords don’t match." };
   if (!isSupabaseConfigured) return { error: NOT_CONFIGURED };
 
+  // Admin → Settings can close registration. The database trigger enforces it too; this gives a clear message.
+  try {
+    const { data: gate } = await createAdminClient().from("platform_settings").select("signups_open").eq("id", 1).maybeSingle();
+    if (gate && gate.signups_open === false) return { error: "New sign-ups are paused right now. Please check back soon." };
+  } catch { /* no service key: the trigger still applies */ }
+
   const supabase = createClient();
   const { error } = await supabase.auth.signUp({
     email,

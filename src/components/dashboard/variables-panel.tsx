@@ -29,8 +29,8 @@ function NameEditor({ contact, onSaved }: { contact: PreviewContact; onSaved: (c
       if (!res.ok) { toast.error(res.error ?? "Couldn’t save that contact."); return; }
       onSaved({ ...contact, first_name: first.trim() || null, last_name: last.trim() || null });
       toast.success("Contact updated.");
-    } catch {
-      toast.error("Couldn’t save. Try again.");
+    } catch (e) {
+      toast.fail("Couldn’t save that contact. Try again.", e);
     } finally {
       setSaving(false);
     }

@@ -188,7 +188,7 @@ export function CampaignEditor(props: Props) {
         setPasteText("");
       }
       if (!r.ok && r.error) toast.error(r.error); else if (r.message) toast.success(r.message);
-    } catch { toast.error("Couldn’t reach the server. Check your connection and try again."); }
+    } catch (e) { toast.fail("Couldn’t add those contacts. Try again.", e); }
     finally { setAdding(false); }
   };
   const clearPasted = () => { setAudience({ mode: "custom", listIds: [], contacts: [] }); setPasteReport(null); };
@@ -235,9 +235,9 @@ export function CampaignEditor(props: Props) {
         if (r.ok) lastSaved.current = key;
         else if (r.fatal) { stopped.current = true; toast.error(r.error); }
         else { retry = true; toast.error(r.error); }
-      } catch {
+      } catch (e) {
         retry = true;
-        toast.warning("Couldn’t reach the server. We’ll keep trying to save your changes.");
+        toast.warning("Can’t save right now. We’ll keep trying.");
       } finally {
         running.current = null;
       }
@@ -280,7 +280,7 @@ export function CampaignEditor(props: Props) {
       const r = await actions.autosave(p);
       if (r.ok) { lastSaved.current = key; setStatus("just"); return true; }
       toast.error(r.error);
-    } catch { toast.error("Couldn’t reach the server. Check your connection and try again."); }
+    } catch (e) { toast.fail("Couldn’t save your changes. Try again.", e); }
     return false;
   };
 
@@ -510,10 +510,10 @@ export function CampaignEditor(props: Props) {
         : { title: "Campaign sent", body: `${res.recipients.toLocaleString("en-US")} ${res.recipients === 1 ? "contact" : "contacts"} will receive it shortly.` },
       );
       setPhase("done");
-    } catch {
+    } catch (e) {
       stopped.current = false;
       setPhase("review");
-      toast.error("Couldn’t reach the server. Nothing was sent. Check your connection and try again.");
+      toast.fail("Campaign not sent. Check your connection and try again.", e);
     }
   };
 
@@ -526,7 +526,7 @@ export function CampaignEditor(props: Props) {
       const r = await actions.test(p);
       if (r.ok) { lastSaved.current = JSON.stringify(p); toast.success(`Test email sent to ${r.to}`); }
       else toast.error(r.error);
-    } catch { toast.error("Couldn’t send the test. Check your connection and try again."); }
+    } catch (e) { toast.fail("Test email not sent. Try again.", e); }
     finally { setTesting(false); }
   };
 

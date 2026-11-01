@@ -248,8 +248,8 @@ function ListSettingsDrawer({ list, signupUrl, open, onClose }: { list: ListSumm
       toast.success(res.message ?? "List deleted.");
       onClose();
       router.push("/app/contacts");
-    } catch {
-      toast.error("Couldn’t delete the list.");
+    } catch (e) {
+      toast.fail("Couldn’t delete the list. Try again.", e);
     } finally {
       setDeleting(false);
     }

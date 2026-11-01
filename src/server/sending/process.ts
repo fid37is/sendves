@@ -135,6 +135,9 @@ export async function runTick(opts: { budgetMs?: number } = {}): Promise<{ activ
   const started = Date.now();
   const settings = await loadSettings(db);
 
+  // Global kill switch (Admin → Settings). Queued mail stays queued and goes out when sending is switched back on.
+  if (settings.sending_paused) return { activated: 0, sent: 0, failed: 0 };
+
   await db.rpc("release_stuck_sends");
   const activated = await activateScheduled(db);
 

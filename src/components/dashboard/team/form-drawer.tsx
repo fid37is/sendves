@@ -31,8 +31,8 @@ export function useDrawerForm(action: (formData: FormData) => Promise<TeamResult
       (res.tone === "warning" ? toast.warning : toast.success)(res.message);
       onSuccess();
       if (res.href) router.push(res.href);
-    } catch {
-      toast.error("Couldn’t save. Try again.");
+    } catch (e) {
+      toast.fail("Couldn’t save. Try again.", e);
     } finally {
       setPending(false);
     }

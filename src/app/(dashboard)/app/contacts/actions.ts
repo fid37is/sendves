@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { limitsFor } from "@/config/plan-limits";
 import { canAccessDepartment, canAssignDepartment, type Access } from "@/lib/access";
 import { go } from "@/lib/flash";
 import { requireWorkspace } from "@/lib/workspace";
@@ -15,7 +14,7 @@ const MAX_SELECTION = 100;
 
 async function remainingRoom(ctx: Awaited<ReturnType<typeof requireWorkspace>>) {
   const { count } = await ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id);
-  const cap = Math.min(ctx.workspace.max_contacts, limitsFor(ctx.workspace.plan).contacts);
+  const cap = ctx.workspace.max_contacts; // the workspace's own limit: seeded from the plan, adjustable by an admin
   return { used: count ?? 0, room: Math.max(0, cap - (count ?? 0)), cap };
 }
 

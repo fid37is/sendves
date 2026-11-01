@@ -191,8 +191,8 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
       }
       setConsent(false);
       close();
-    } catch {
-      toast.error("Couldn’t add contacts.");
+    } catch (e) {
+      toast.fail("Couldn’t add the contacts. Try again.", e);
     } finally {
       setSaving(false);
     }
