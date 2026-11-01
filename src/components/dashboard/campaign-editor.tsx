@@ -1,566 +1,594 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { AlertTriangle, BookmarkPlus, ChevronRight, Check, Eye, Info } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader } from "@/components/ui/card";
-import { Field, Input, Select } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
-import { useConfirm } from "@/components/ui/confirm";
-import { cn } from "@/lib/utils";
-import { AudiencePicker, AudienceSummary, type AudienceActions, type AudienceState } from "@/components/dashboard/audience-panel";
-import { BlockEditor } from "@/components/dashboard/block-editor";
-import { CampaignPreview } from "@/components/dashboard/campaign-preview";
-import { buildVariableOptions, VariableField } from "@/components/dashboard/variable-field";
-import { PreviewAsCard, SAMPLE_ID, VariablesEditor } from "@/components/dashboard/variables-panel";
-import type { AutosaveResult, PreviewContact } from "@/app/(dashboard)/app/campaigns/actions";
-import type { SaveTemplateResult } from "@/app/(dashboard)/app/templates/actions";
+import { BUILT_IN_VARIABLES, isBuiltInVariable, sanitizeVariables, type VariableDef } from "@/lib/email/variables";
+import {
+  EXTRA_EDITOR_BLOCKS, newBlock, prettyKey, reviewChecks, scanContent, scheduleInstant, SCHEDULE_ZONES, switchLayout, TEMPLATE_NAMES,
+  type BlockType, type Check, type ContactLike, type Design, type Layout, type Logo, type SlotKey, type Step, type Tab,
+} from "@/lib/email/campaign";
+import { buildCampaignDoc } from "@/lib/email/campaign-preview";
+import { previewSubject } from "@/lib/email/preview";
 import type { AudienceOption, SenderRow } from "@/lib/queries";
-import type { Block } from "@/lib/email/blocks";
-import { buildPreviewDoc, previewSubject, SAMPLE_VARS } from "@/lib/email/preview";
-import { analyzeVariables, blockStrings, knownKeys, sanitizeVariables, type VariableDef } from "@/lib/email/variables";
+import { cn } from "@/lib/utils";
+import type { EditorPayload, PreviewContact, SaveResult, SubmitInput, SubmitResult, TestResult } from "@/app/(dashboard)/app/campaigns/actions";
+import { Canvas } from "@/components/editor/canvas";
+import { ReviewDialog, ScheduleDialog, SwitchDialog, type ScheduleValues, type SendOutcome } from "@/components/editor/dialogs";
+import { prepareImage, uploadImage } from "@/components/editor/image";
+import { PreviewStep } from "@/components/editor/preview-step";
+import { SidePanel } from "@/components/editor/side-panel";
+import { SetupStep, senderProblem } from "@/components/editor/setup-step";
+import { NO_CONTACT, type AudienceState, type Doc } from "@/components/editor/types";
 
-type Action = (formData: FormData) => Promise<void>;
-type Tab = "details" | "audience" | "content" | "variables" | "review";
-const TABS: { key: Tab; label: string }[] = [
-  { key: "details", label: "Details" },
-  { key: "audience", label: "Audience" },
-  { key: "content", label: "Content" },
-  { key: "variables", label: "Variables" },
-  { key: "review", label: "Review & send" },
-];
+export type EditorCampaign = {
+  id: string;
+  name: string;
+  subject: string;
+  preheader: string;
+  senderId: string;
+  design: Design;
+  variables: VariableDef[];
+  audience: AudienceState;
+};
 
 type Props = {
-  campaign: {
-    id: string; name: string; subject: string; preview_text: string;
-    sender_identity_id: string | null; department_id: string | null;
-    blocks: Block[]; variables: VariableDef[];
-    audience: AudienceState;
-  };
-  /** What this person can send as: their work email and their aliases (active or not; the editor marks the unusable ones). */
+  campaign: EditorCampaign;
+  logo: Logo;
   senders: SenderRow[];
-  /** Departments this person may put the campaign in. */
-  departments: { id: string; name: string }[];
-  orgWideAllowed: boolean;
   lists: AudienceOption[];
-  /** Everyone subscribed in the workspace: the size of "Everyone subscribed". */
   totalSubscribed: number;
-  /** Custom contact fields found on contacts (extra CSV columns). */
+  /** Extra contact columns (company, city…), usable as variables and in conditions. */
   contactFieldKeys: string[];
-  workspace: { name: string; business_address: string | null };
-  can: { send: boolean; createContacts: boolean; viewContacts: boolean; saveTemplate: boolean };
+  workspace: { name: string; business_address: string | null; timezone: string };
+  canSend: boolean;
   actions: {
-    autosave: (formData: FormData) => Promise<AutosaveResult>;
-    save: Action; test: Action; submit: Action; remove: Action;
-    saveTemplate: (input: { name: string; subject: string; previewText: string; blocks: unknown; variables: unknown; departmentId: string | null }) => Promise<SaveTemplateResult>;
+    autosave: (p: EditorPayload) => Promise<SaveResult>;
+    test: (p: EditorPayload) => Promise<TestResult>;
+    submit: (p: SubmitInput) => Promise<SubmitResult>;
     previewContacts: (selection: unknown) => Promise<PreviewContact[]>;
     audienceSize: (selection: unknown) => Promise<{ ok: true; size: number } | { ok: false; error: string }>;
-    audience: AudienceActions;
   };
 };
 
-const AUTOSAVE_DELAY_MS = 2500; // pause after the last edit before saving
-const RETRY_DELAY_MS = 6000; // wait before retrying a failed save
-const NOT_SAVED_KEYS = new Set(["mode", "scheduledAtIso"]); // send options, not part of the draft
-const people = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "person" : "people"}`;
+const SAVE_DELAY = 2000;
+const RETRY_DELAY = 8000;
+const HISTORY_LIMIT = 30;
 
-export function CampaignEditor({ campaign, senders, departments, orgWideAllowed, lists, totalSubscribed, contactFieldKeys, workspace, can, actions }: Props) {
-  const confirm = useConfirm();
-  const formRef = useRef<HTMLFormElement | null>(null);
+/** Built-in variables that have a default (first name → "there") start with it set, so they count as having a fallback. */
+function withDefaultFallbacks(defs: VariableDef[]): VariableDef[] {
+  const out = [...defs];
+  for (const v of BUILT_IN_VARIABLES) {
+    if (v.fallback && !out.some((d) => d.key === v.key)) out.push({ key: v.key, scope: "recipient", value: "", fallback: v.fallback });
+  }
+  return out;
+}
 
-  // ── Everything the person edits lives here, so switching tabs or opening the preview loses nothing ──
-  const [tab, setTab] = useState<Tab>("details");
-  const [view, setView] = useState<"edit" | "preview">("edit");
-  const [name, setName] = useState(campaign.name);
+const contactLabel = (c: PreviewContact) => `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || c.email;
+const asContact = (c: PreviewContact | null): ContactLike | null => (c ? { first_name: c.first_name, last_name: c.last_name, email: c.email, custom_fields: c.custom_fields } : null);
+
+/** The campaign editor: Setup, Content and Preview, then a review before anything is sent. */
+export function CampaignEditor(props: Props) {
+  const { campaign, actions, workspace, lists } = props;
+  const router = useRouter();
+
+  // ── Where the person is ──
+  const [step, setStep] = useState<Step>("setup");
+  const [tab, setTab] = useState<Tab>("blocks");
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState<string | null>(null);
+  const [slot, setSlot] = useState<SlotKey | null>(null);
+  const [pend, setPend] = useState<number | null>(null);
+
+  // ── What is being edited ──
+  const [senderId, setSenderId] = useState(campaign.senderId);
   const [subject, setSubject] = useState(campaign.subject);
-  const [previewText, setPreviewText] = useState(campaign.preview_text);
-  const [senderId, setSenderId] = useState(campaign.sender_identity_id ?? "");
-  const [departmentId, setDepartmentId] = useState(campaign.department_id ?? "");
-  const [blocks, setBlocks] = useState<Block[]>(campaign.blocks);
-  const [variables, setVariables] = useState<VariableDef[]>(campaign.variables);
+  const [preheader, setPreheader] = useState(campaign.preheader);
   const [audience, setAudience] = useState<AudienceState>(campaign.audience);
-  const [mode, setMode] = useState<"now" | "later">("now");
-  const [iso, setIso] = useState("");
+  const [variables, setVariables] = useState<VariableDef[]>(() => withDefaultFallbacks(campaign.variables));
+  const [doc, setDoc] = useState<Doc>({ design: campaign.design, logo: props.logo });
+  const design = doc.design;
 
-  const validDefs = useMemo(() => sanitizeVariables(variables), [variables]);
-  const variableOptions = useMemo(() => buildVariableOptions(validDefs, contactFieldKeys), [validDefs, contactFieldKeys]);
+  // Undo goes back through the design and the logo (text typed in between isn't a step of its own, as in the prototype).
+  const docRef = useRef(doc);
+  docRef.current = doc;
+  const history = useRef<string[]>([]);
+  const [historyLength, setHistoryLength] = useState(0);
+  const snap = useCallback(() => {
+    history.current.push(JSON.stringify(docRef.current));
+    if (history.current.length > HISTORY_LIMIT) history.current.shift();
+    setHistoryLength(history.current.length);
+  }, []);
+  const mutate = useCallback((fn: (d: Doc) => Doc, record = true) => {
+    if (record) snap();
+    setDoc(fn);
+  }, [snap]);
+  const undo = () => {
+    const last = history.current.pop();
+    setHistoryLength(history.current.length);
+    if (!last) return;
+    setDoc(JSON.parse(last) as Doc);
+    setSel(null);
+    setSlot(null);
+  };
 
-  // ── Sender ──────────────────────────────────────────────────────────────
-  const sender = senders.find((s) => s.id === senderId) ?? null;
-  const usable = (s: SenderRow) => s.status === "active" && s.domainReady;
-  const senderProblem = !senders.length ? "You don’t have a work email yet. Set one under Team (the owner can do this for you)." : !sender ? "Choose who this email comes from." : !usable(sender) ? (sender.status !== "active" ? `${sender.email} is deactivated.` : `The domain of ${sender.email} isn’t verified.`) : null;
-  const fromLabel = sender ? `${sender.fromName} <${sender.email}>` : "";
+  // ── Variables ──
+  const variableList = useMemo(() => [
+    ...BUILT_IN_VARIABLES.map((v) => ({ key: v.key as string, label: v.label as string })),
+    ...props.contactFieldKeys.filter((k) => !isBuiltInVariable(k)).map((k) => ({ key: k, label: prettyKey(k) })),
+  ], [props.contactFieldKeys]);
+  const labels = useMemo(() => Object.fromEntries(variableList.map((v) => [v.key, v.label])), [variableList]);
+  const fallbacks = useMemo(() => Object.fromEntries(variables.filter((v) => v.scope === "recipient").map((v) => [v.key, v.fallback])), [variables]);
+  const setFallback = (key: string, value: string) => setVariables((cur) => {
+    const existing = cur.find((v) => v.key === key);
+    const rest = cur.filter((v) => v.key !== key);
+    if (!value && (!existing || existing.scope === "recipient")) return rest; // an empty fallback is no fallback
+    return [...rest, { key, scope: existing?.scope ?? "recipient", value: existing?.value ?? "", fallback: value }];
+  });
 
-  // ── Audience: size is counted on the server by the same rules the sender uses ──
+  const ctx = useMemo(() => ({ logo: doc.logo, tz: workspace.timezone, labels }), [doc.logo, workspace.timezone, labels]);
+  const selBlock = useMemo(() => design.blocks.find((b) => b.id === sel) ?? null, [design.blocks, sel]);
+
+  // ── Audience ──
+  const legacy = useRef(campaign.audience).current;
+  const legacyIsCustom = legacy.mode === "custom" && (legacy.contacts.length > 0 || legacy.listIds.length > 1);
+  const legacyLabel = `Your selection (${[
+    legacy.listIds.length ? `${legacy.listIds.length} ${legacy.listIds.length === 1 ? "list" : "lists"}` : "",
+    legacy.contacts.length ? `${legacy.contacts.length} ${legacy.contacts.length === 1 ? "person" : "people"}` : "",
+  ].filter(Boolean).join(", ")})`;
+  const audienceValue = audience.mode === "all" ? "all"
+    : audience.contacts.length === 0 && audience.listIds.length === 0 ? ""
+    : audience.contacts.length === 0 && audience.listIds.length === 1 ? `list:${audience.listIds[0]}`
+    : "keep";
+  const audienceOptions = useMemo(() => [
+    { value: "", label: "Choose an audience…" },
+    { value: "all", label: "All subscribers" },
+    ...lists.map((l) => ({ value: `list:${l.id}`, label: l.name })),
+    ...(legacyIsCustom ? [{ value: "keep", label: legacyLabel }] : []),
+  ], [lists, legacyIsCustom, legacyLabel]);
+  const onAudience = (v: string) => {
+    if (v === "all") setAudience({ mode: "all", listIds: [], contacts: [] });
+    else if (v.startsWith("list:")) setAudience({ mode: "custom", listIds: [v.slice(5)], contacts: [] });
+    else if (v === "keep") setAudience(legacy);
+    else setAudience({ mode: "custom", listIds: [], contacts: [] });
+  };
+  const audienceName = audienceOptions.find((o) => o.value === audienceValue)?.label ?? "";
+  const chosen = audienceValue !== "";
   const selection = useMemo(() => ({ mode: audience.mode, listIds: audience.listIds, contactIds: audience.contacts.map((c) => c.id) }), [audience]);
   const selectionKey = JSON.stringify(selection);
-  const [size, setSize] = useState<number | null>(null);
-  const [sizing, setSizing] = useState(true);
-  const [listOptions] = useState(lists);
-  const { audienceSize, previewContacts } = actions;
+  const estimate = audienceValue === "all" ? props.totalSubscribed : audienceValue.startsWith("list:") ? lists.find((l) => l.id === audience.listIds[0])?.subscribed ?? null : null;
+  const [serverSize, setServerSize] = useState<number | null>(null);
   useEffect(() => {
-    let cancelled = false;
-    setSizing(true);
+    setServerSize(null);
+    if (!chosen) return;
+    let live = true;
     const t = setTimeout(async () => {
-      try {
-        const res = await audienceSize(JSON.parse(selectionKey));
-        if (!cancelled && res.ok) setSize(res.size);
-      } catch { /* keeps the last known size */ } finally {
-        if (!cancelled) setSizing(false);
-      }
-    }, 300);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [selectionKey, audienceSize]);
+      try { const r = await actions.audienceSize(JSON.parse(selectionKey)); if (live && r.ok) setServerSize(r.size); } catch { /* the estimate stays */ }
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [selectionKey, chosen, actions]);
+  const reach: number | null = chosen ? serverSize ?? estimate : 0;
 
-  // ── Preview-as: real people from the audience ───────────────────────────
-  const [contacts, setContacts] = useState<PreviewContact[]>([]);
-  const [previewAs, setPreviewAs] = useState(SAMPLE_ID);
-  useEffect(() => {
-    let cancelled = false;
-    const t = setTimeout(() => {
-      previewContacts(JSON.parse(selectionKey))
-        .then((rows) => { if (!cancelled) { setContacts(rows); setPreviewAs((cur) => (rows.some((r) => r.id === cur) ? cur : SAMPLE_ID)); } })
-        .catch(() => { if (!cancelled) setContacts((c) => c); });
-    }, 500);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [selectionKey, previewContacts]);
-  const chosen = contacts.find((c) => c.id === previewAs) ?? null;
-  const vars = useMemo(() => (chosen ? { first_name: chosen.first_name, last_name: chosen.last_name, email: chosen.email, custom_fields: chosen.custom_fields } : SAMPLE_VARS), [chosen]);
-  const asLabel = chosen ? [chosen.first_name, chosen.last_name].filter(Boolean).join(" ") || chosen.email : "Sample person (Ada Lovelace)";
-
-  // ── Variables check ─────────────────────────────────────────────────────
-  const report = useMemo(
-    () => analyzeVariables([subject, previewText, ...blockStrings(blocks)], knownKeys(contactFieldKeys, validDefs), validDefs),
-    [subject, previewText, blocks, contactFieldKeys, validDefs],
-  );
-  const variablesOk = report.malformed.length === 0 && report.undefinedKeys.length === 0;
-
-  // ── Preview: a separate full-width view. The editor stays mounted underneath, so nothing is lost ──
-  const previewSlot = useRef<HTMLSpanElement | null>(null);
-  const openPreview = () => {
-    window.history.pushState({ svPreview: true }, "", "#preview");
-    setView("preview");
-  };
-  const closePreview = () => {
-    if (window.location.hash === "#preview") window.history.back();
-    else setView("edit");
-  };
-  useEffect(() => {
-    const onPop = () => setView(window.location.hash === "#preview" ? "preview" : "edit");
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
-  useEffect(() => { if (view === "edit") previewSlot.current?.querySelector("button")?.focus({ preventScroll: true }); }, [view]);
-
-  // Built from the current (even unsaved) state, only while the preview is open.
-  const previewDoc = useMemo(
-    () => (view === "preview" ? buildPreviewDoc(blocks, { preview: previewText, workspaceName: workspace.name, businessAddress: workspace.business_address, vars, variables: validDefs }) : ""),
-    [view, blocks, previewText, workspace, vars, validDefs],
-  );
-
-  // ── Save as template: uses the campaign's own title, nothing else is asked ──
-  const [savingTpl, setSavingTpl] = useState(false);
-  const saveAsTemplate = async () => {
-    if (savingTpl) return;
-    setSavingTpl(true);
-    try {
-      const res = await actions.saveTemplate({ name: name.trim(), subject, previewText, blocks, variables: validDefs, departmentId: departmentId || null });
-      if (res.ok) toast.success(`Saved “${res.name}” to your templates.`); else toast.error(res.error);
-    } catch {
-      toast.error("Couldn’t save the template.");
-    } finally {
-      setSavingTpl(false);
-    }
-  };
-
-  // ── Autosave ────────────────────────────────────────────────────────────
-  // Edits are saved a couple of seconds after you stop typing. Only one save runs at a time; edits
-  // made while one is running are picked up by the next. Nothing is sent if nothing changed.
-  const lastSaved = useRef<string | null>(null);
+  // ── Saving ──
+  const payload: EditorPayload = useMemo(() => ({
+    id: campaign.id, senderId, subject, preheader, audience: selection, design: doc.design, logo: doc.logo, variables: sanitizeVariables(variables),
+  }), [campaign.id, senderId, subject, preheader, selection, doc, variables]);
+  const payloadKey = useMemo(() => JSON.stringify(payload), [payload]);
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
+  const lastSaved = useRef(payloadKey);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inFlight = useRef(false);
-  const stopped = useRef(false); // set when retrying can't help (campaign sent or deleted elsewhere)
-  const mounted = useRef(false);
+  const running = useRef<Promise<void> | null>(null);
+  const stopped = useRef(false);
+  const [status, setStatus] = useState<"saved" | "saving" | "just">("saved");
 
-  const snapshot = useCallback(() => {
-    const form = formRef.current;
-    if (!form) return null;
-    const data = new FormData(form);
-    const parts: [string, string][] = [];
-    data.forEach((v, k) => { if (typeof v === "string" && !NOT_SAVED_KEYS.has(k)) parts.push([k, v]); });
-    return { data, key: JSON.stringify(parts) };
-  }, []);
-
-  const save = useCallback(async () => {
+  const save = useCallback((): void => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
-    if (inFlight.current || stopped.current) return;
-    const snap = snapshot();
-    if (!snap || snap.key === lastSaved.current) return;
-
-    inFlight.current = true;
-    try {
-      const res = await actions.autosave(snap.data);
-      if (res.ok) {
-        lastSaved.current = snap.key;
-        toast.success("Progress saved.");
-      } else if (res.fatal) {
-        stopped.current = true;
-        toast.error(res.error);
-      } else {
-        toast.error(`${res.error} Retrying…`);
-        timer.current = setTimeout(() => void save(), RETRY_DELAY_MS);
+    if (running.current || stopped.current) return;
+    const p = payloadRef.current;
+    const key = JSON.stringify(p);
+    if (key === lastSaved.current) { setStatus((s) => (s === "saving" ? "just" : s)); return; }
+    running.current = (async () => {
+      let retry = false;
+      try {
+        const r = await actions.autosave(p);
+        if (r.ok) lastSaved.current = key;
+        else if (r.fatal) { stopped.current = true; toast.error(r.error); }
+        else { retry = true; toast.error(r.error); }
+      } catch {
+        retry = true;
+        toast.warning("Couldn’t reach the server. We’ll keep trying to save your changes.");
+      } finally {
+        running.current = null;
       }
-    } catch {
-      toast.error("You appear to be offline. Retrying…");
-      timer.current = setTimeout(() => void save(), RETRY_DELAY_MS);
-    } finally {
-      inFlight.current = false;
-      const next = snapshot();
-      if (!stopped.current && !timer.current && next && next.key !== lastSaved.current) {
-        timer.current = setTimeout(() => void save(), AUTOSAVE_DELAY_MS);
-      }
-    }
-  }, [actions, snapshot]);
-
-  const scheduleSave = useCallback(() => {
-    if (stopped.current) return;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => { timer.current = null; void save(); }, AUTOSAVE_DELAY_MS);
-  }, [save]);
-
-  // The first run records what's already saved; later runs (any edit) schedule a save.
-  useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true;
-      lastSaved.current = snapshot()?.key ?? null;
-      return;
-    }
-    scheduleSave();
-  }, [name, subject, previewText, senderId, departmentId, blocks, variables, audience, scheduleSave, snapshot]);
-
-  // Save straight away when the tab is hidden, and warn before leaving with unsaved edits.
-  useEffect(() => {
-    const onVisibility = () => { if (document.visibilityState === "hidden") void save(); };
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (stopped.current) return;
-      const snap = snapshot();
-      if (inFlight.current || (snap && snap.key !== lastSaved.current)) { e.preventDefault(); e.returnValue = ""; }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => { document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("beforeunload", onBeforeUnload); };
-  }, [save, snapshot]);
+      if (JSON.stringify(payloadRef.current) === lastSaved.current) setStatus("just");
+      else timer.current = setTimeout(save, retry ? RETRY_DELAY : SAVE_DELAY);
+    })();
+  }, [actions]);
+
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    if (stopped.current) return;
+    setStatus("saving");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(save, SAVE_DELAY);
+  }, [payloadKey, save]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  // ── Review ──────────────────────────────────────────────────────────────
-  const checks: { key: string; ok: boolean; pending?: boolean; label: string; detail: string; tab?: Tab; href?: string }[] = [
-    { key: "subject", ok: !!subject.trim(), label: "Subject line", detail: subject.trim() ? previewSubject(subject, vars, validDefs) : "Add a subject line.", tab: "details" },
-    { key: "sender", ok: !senderProblem, label: "Sender", detail: senderProblem ?? fromLabel, tab: "details" },
-    { key: "audience", ok: (size ?? 0) > 0, pending: size === null, label: "Audience", detail: size === null ? "Counting…" : size > 0 ? `${people(size)} will receive it.` : "No subscribed people are selected.", tab: "audience" },
-    { key: "content", ok: blocks.length > 0, label: "Content", detail: blocks.length ? `${blocks.length} ${blocks.length === 1 ? "block" : "blocks"}.` : "Add some content.", tab: "content" },
-    { key: "variables", ok: variablesOk, label: "Variables", detail: variablesOk ? (report.used.length ? `${report.used.length} in use, all can be filled in.` : "None used.") : [report.malformed.length ? `Can’t read ${report.malformed.join(", ")}.` : "", report.undefinedKeys.length ? `No value or fallback for ${report.undefinedKeys.map((k) => `{{${k}}}`).join(", ")}.` : ""].filter(Boolean).join(" "), tab: "variables" },
-    { key: "address", ok: !!workspace.business_address, label: "Business address", detail: workspace.business_address ? "Shown in the footer." : "Add it in Settings. It appears in every footer.", href: "/app/settings" },
-  ];
-  const ready = checks.every((c) => c.ok);
-  const issues: Record<Tab, boolean> = {
-    details: !checks[0].ok || !checks[1].ok,
-    audience: size !== null && size === 0,
-    content: !checks[3].ok,
-    variables: !variablesOk,
-    review: false,
+  // Leaving the tab saves what is pending; closing the page asks first if that couldn't finish.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === "hidden") save(); };
+    const onUnload = (e: BeforeUnloadEvent) => {
+      if (stopped.current) return;
+      if (running.current || JSON.stringify(payloadRef.current) !== lastSaved.current) { save(); e.preventDefault(); e.returnValue = ""; }
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("beforeunload", onUnload);
+    return () => { document.removeEventListener("visibilitychange", onHide); window.removeEventListener("beforeunload", onUnload); };
+  }, [save]);
+
+  /** Saves right now and waits for it. False when it couldn't be saved. */
+  const saveNow = async (): Promise<boolean> => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (running.current) await running.current;
+    const p = payloadRef.current;
+    const key = JSON.stringify(p);
+    if (key === lastSaved.current) return true;
+    try {
+      const r = await actions.autosave(p);
+      if (r.ok) { lastSaved.current = key; setStatus("just"); return true; }
+      toast.error(r.error);
+    } catch { toast.error("Couldn’t reach the server. Check your connection and try again."); }
+    return false;
   };
 
-  const index = TABS.findIndex((t) => t.key === tab);
-  const last = index === TABS.length - 1;
-  const goTo = (t: Tab) => { setTab(t); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  // ── Moving around and changing the email ──
+  const mclose = () => { if (typeof window !== "undefined" && window.matchMedia("(max-width:760px)").matches) setOpen(false); };
+  const focusLater = (id: string) => setTimeout(() => document.getElementById(id)?.focus(), 60);
 
-  const confirmAndSubmit = async (e: React.MouseEvent<HTMLButtonElement>) => {
-    // Ask first; submit with this button (so its formAction is used) only after a yes.
-    const button = e.currentTarget;
-    const form = button.form;
-    e.preventDefault();
-    const n = size ?? 0;
-    const ok = await confirm({
-      title: mode === "now" ? "Send this campaign now?" : "Schedule this campaign?",
-      description: mode === "now" ? `It goes to ${people(n)} straight away, from ${fromLabel || "your sender"}. Emails can’t be recalled once sent.` : `It will be sent to ${people(n)} at the time you chose, from ${fromLabel || "your sender"}.`,
-      confirmLabel: mode === "now" ? "Send campaign" : "Schedule campaign",
+  const selectBlock = (id: string) => {
+    const b = design.blocks.find((x) => x.id === id);
+    if (!b) return;
+    setSel(id); setSlot(null); setPend(null); setOpen(true);
+    setTab(b.x !== undefined || EXTRA_EDITOR_BLOCKS.has(b.t) || b.t === "logo" || b.t === "banner" ? "edit" : b.t === "image" ? "media" : "blocks");
+  };
+  const selectSlot = (k: SlotKey) => { setSlot(k); setSel(null); setOpen(true); setTab("edit"); };
+  const openPanel = (t: Tab) => { setTab(t); setOpen(true); };
+
+  const insertBlock = (b: ReturnType<typeof newBlock>) => {
+    mutate((d) => {
+      const blocks = [...d.design.blocks];
+      let at = pend;
+      if (at === null) { const i = blocks.findIndex((x) => x.id === sel); at = i < 0 ? blocks.length : i + 1; }
+      blocks.splice(Math.min(at, blocks.length), 0, b);
+      return { ...d, design: { ...d.design, blocks } };
     });
-    if (ok) form?.requestSubmit(button);
+    setPend(null); setSel(b.id); setSlot(null);
+    setTab(b.x !== undefined || EXTRA_EDITOR_BLOCKS.has(b.t) ? "edit" : "blocks");
+  };
+  const addBlock = (t: BlockType) => { insertBlock(newBlock(t, design)); mclose(); };
+  const removeBlock = (id: string) => { mutate((d) => ({ ...d, design: { ...d.design, blocks: d.design.blocks.filter((b) => b.id !== id) } })); setSel(null); };
+  const moveBlock = (id: string, delta: -1 | 1) => mutate((d) => {
+    const blocks = [...d.design.blocks];
+    const i = blocks.findIndex((b) => b.id === id), j = i + delta;
+    if (i < 0 || j < 0 || j >= blocks.length) return d;
+    [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
+    return { ...d, design: { ...d.design, blocks } };
+  });
+  const reorder = (fromId: string, toId: string) => mutate((d) => {
+    const blocks = [...d.design.blocks];
+    const i = blocks.findIndex((b) => b.id === fromId);
+    if (i < 0) return d;
+    const [moved] = blocks.splice(i, 1);
+    const to = blocks.findIndex((b) => b.id === toId);
+    blocks.splice(to < 0 ? blocks.length : to, 0, moved);
+    return { ...d, design: { ...d.design, blocks } };
+  });
+
+  const [switchTo, setSwitchTo] = useState<Layout | null>(null);
+  const applyLayout = (k: Layout) => {
+    mutate((d) => ({ ...d, design: switchLayout(d.design, k) }));
+    setSel(null); setSlot(null); setSwitchTo(null); mclose();
+  };
+  const askLayout = (k: Layout) => {
+    if (k === design.tpl) return;
+    if (design.tpl !== "custom" && k !== "custom") applyLayout(k); // template to template: nothing to explain
+    else setSwitchTo(k);
   };
 
-  const audiencePayload = JSON.stringify(selection);
+  const pickPreset = (g: number) => {
+    if (design.tpl !== "custom" || selBlock?.t === "banner") {
+      mutate((d) => ({ ...d, design: { ...d.design, banner: { ...d.design.banner, src: `g${g}` } } }));
+    } else if (selBlock?.t === "image") {
+      const id = selBlock.id;
+      mutate((d) => ({ ...d, design: { ...d.design, blocks: d.design.blocks.map((b) => (b.id === id ? { id: b.id, t: "image" as const, g, ...(b.cond ? { cond: b.cond } : {}) } : b)) } }));
+    } else {
+      const b = newBlock("image", design);
+      b.g = g;
+      insertBlock(b);
+    }
+    setTimeout(mclose, 0);
+  };
+
+  const insertVariable = (key: string) => {
+    const token = `{{${key}}}`;
+    const join = (text: string) => `${text}${text && !/\s$/.test(text) ? " " : ""}${token}`;
+    if (design.tpl !== "custom") {
+      const field = slot === "headline" ? "headline" : slot === "body" ? "body" : slot === "button" ? "btn" : slot === "footer" ? "foot" : null;
+      if (!field) { toast.info("Select a text block first"); return; }
+      mutate((d) => ({ ...d, design: { ...d.design, C: { ...d.design.C, [field]: join(d.design.C[field]) } } }), false);
+    } else if (selBlock && selBlock.x !== undefined) {
+      const id = selBlock.id;
+      mutate((d) => ({ ...d, design: { ...d.design, blocks: d.design.blocks.map((b) => (b.id === id ? { ...b, x: join(b.x ?? "") } : b)) } }), false);
+    } else { toast.info("Select a text block first"); return; }
+    toast.success(`Inserted ${labels[key] ?? key}`);
+  };
+
+  // ── Pictures ──
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const fileKind = useRef<"logo" | "banner">("logo");
+  const [uploading, setUploading] = useState(false);
+  const pickImage = (kind: "logo" | "banner") => { fileKind.current = kind; fileInput.current?.click(); };
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const kind = fileKind.current;
+    setUploading(true);
+    try {
+      const img = await prepareImage(file, kind);
+      const url = await uploadImage(img.blob, kind);
+      if (kind === "logo") mutate((d) => ({ ...d, logo: { ...d.logo, src: url, w: img.w, h: img.h } }));
+      else mutate((d) => ({ ...d, design: { ...d.design, banner: { ...d.design.banner, src: url, fx: 50, fy: 50 } } }));
+    } catch (err) {
+      toast.error((err as Error).message || "Couldn’t add that picture.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ── Preview ──
+  const [device, setDevice] = useState<"desk" | "mob">("desk");
+  const [dark, setDark] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const [contacts, setContacts] = useState<PreviewContact[]>([]);
+  const [contactId, setContactId] = useState(NO_CONTACT);
+  const pickedNone = useRef(false);
+  useEffect(() => {
+    if (step !== "preview" || !chosen) { setContacts([]); return; }
+    let live = true;
+    const t = setTimeout(async () => {
+      try {
+        const rows = await actions.previewContacts(JSON.parse(selectionKey));
+        if (!live) return;
+        setContacts(rows);
+        setContactId((cur) => ((cur !== NO_CONTACT && rows.some((r) => r.id === cur)) || (cur === NO_CONTACT && pickedNone.current) ? cur : rows[0]?.id ?? NO_CONTACT));
+      } catch { if (live) setContacts([]); }
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [step, chosen, selectionKey, actions]);
+
+  const preview = useMemo(() => {
+    if (step !== "preview") return null;
+    const variant = (id: string, label: string, c: PreviewContact | null) => ({
+      id, label,
+      subject: previewSubject(subject, asContact(c) ?? {}, variables),
+      doc: buildCampaignDoc(design, { logo: doc.logo, tz: workspace.timezone }, { preheader, contact: asContact(c), variables, businessAddress: workspace.business_address, dark }),
+    });
+    const current = contacts.find((c) => c.id === contactId) ?? null;
+    const single = variant(contactId, current ? contactLabel(current) : "No contact data (fallbacks)", current);
+    const compare = comparing
+      ? [...contacts.slice(0, 2).map((c) => variant(c.id, contactLabel(c), c)), variant(NO_CONTACT, "No contact data (fallbacks)", null)]
+      : [];
+    return { single, compare };
+  }, [step, contacts, contactId, comparing, design, doc.logo, subject, preheader, variables, dark, workspace]);
+
+  // ── Review, schedule and send ──
+  const sender = props.senders.find((s) => s.id === senderId) ?? null;
+  const problem = senderProblem(props.senders, senderId);
+  const checks: Check[] = useMemo(() => reviewChecks({
+    subject, design, logo: doc.logo, variables, extraTexts: [subject, preheader],
+    audience: { chosen, name: audienceName, size: chosen ? reach : 0 },
+    sender: { ok: !problem, label: sender ? `${sender.fromName} <${sender.email}>` : "", problem },
+    addressSet: Boolean(workspace.business_address?.trim()),
+  }), [subject, preheader, design, doc.logo, variables, chosen, audienceName, reach, problem, sender, workspace.business_address]);
+  const scan = useMemo(() => scanContent(subject, preheader, design), [subject, preheader, design]);
+
+  const [review, setReview] = useState<{ mode: "now" | "sched" } | null>(null);
+  const [phase, setPhase] = useState<"review" | "sending" | "done">("review");
+  const [outcome, setOutcome] = useState<SendOutcome | null>(null);
+  const [sched, setSched] = useState<{ label: string; iso: string } | null>(null);
+  const [scheduling, setScheduling] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const onClick = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(false); };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
+  }, [menu]);
+
+  const openReview = (mode: "now" | "sched") => { setPhase("review"); setReview({ mode }); setMenu(false); };
+  const continueSchedule = (v: ScheduleValues) => {
+    if (!v.date) { toast.error("Pick a date"); return; }
+    const at = scheduleInstant(v.date, v.time || "09:00", v.zone);
+    if (at === null) { toast.error("Pick a valid date and time"); return; }
+    if (at < Date.now() + 60_000) { toast.error("Pick a time at least a minute from now"); return; }
+    if (at > Date.now() + 90 * 86400_000) { toast.error("You can schedule up to 90 days ahead"); return; }
+    const zone = SCHEDULE_ZONES.find((z) => z.key === v.zone)!;
+    setSched({ label: `${v.date} at ${v.time || "09:00"}, ${zone.label}`, iso: new Date(at).toISOString() });
+    setScheduling(false);
+    openReview("sched");
+  };
+
+  const fix = async (c: Check) => {
+    if (c.href) { if (await saveNow()) router.push(c.href); return; }
+    setReview(null);
+    if (c.go === "setup") { setStep("setup"); focusLater(c.focus === "aud" ? "aud" : c.focus === "sender" ? "fromMail" : "subject"); return; }
+    setStep("content");
+    if (c.sel) { setSel(c.sel); setSlot(null); }
+    else if (c.slot) { setSlot(c.slot); setSel(null); }
+    else if (c.tab === "blocks" || c.tab === "vars") setSel(null);
+    if (c.tab) { setTab(c.tab); setOpen(true); }
+  };
+
+  const send = async () => {
+    if (!review) return;
+    const mode = review.mode;
+    setPhase("sending");
+    // Nothing may save over the campaign while it is being queued.
+    stopped.current = true;
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (running.current) await running.current;
+    try {
+      const res = await actions.submit({ ...payloadRef.current, mode: mode === "sched" ? "later" : "now", scheduledAtIso: mode === "sched" ? sched?.iso : undefined });
+      if (!res.ok) { stopped.current = false; setPhase("review"); toast.error(res.error); return; }
+      setOutcome(
+        res.inReview ? { title: "Submitted for review", body: "New accounts have their first campaign checked before it goes out, usually within a day." }
+        : res.mode === "later" ? { title: "Campaign scheduled", body: sched?.label ?? "" }
+        : { title: "Campaign sent", body: `${res.recipients.toLocaleString("en-US")} ${res.recipients === 1 ? "contact" : "contacts"} will receive it shortly.` },
+      );
+      setPhase("done");
+    } catch {
+      stopped.current = false;
+      setPhase("review");
+      toast.error("Couldn’t reach the server. Nothing was sent. Check your connection and try again.");
+    }
+  };
+
+  const [testing, setTesting] = useState(false);
+  const sendTest = async () => {
+    if (testing) return;
+    setTesting(true);
+    const p = payloadRef.current;
+    try {
+      const r = await actions.test(p);
+      if (r.ok) { lastSaved.current = JSON.stringify(p); toast.success(`Test email sent to ${r.to}`); }
+      else toast.error(r.error);
+    } catch { toast.error("Couldn’t send the test. Check your connection and try again."); }
+    finally { setTesting(false); }
+  };
+
+  const steps: [Step, string][] = [["setup", "Setup"], ["content", "Content"], ["preview", "Preview"]];
+  const statusText = status === "saving" ? "Saving…" : status === "just" ? "Saved just now" : "Saved";
+  const custom = design.tpl === "custom";
 
   return (
-    <>
-      <form
-        ref={formRef}
-        className={view === "preview" ? "hidden" : undefined}
-        // Enter in a text field must not submit the form (the first submit button would send a test).
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT" && (e.target as HTMLInputElement).type !== "submit") e.preventDefault(); }}
-        aria-hidden={view === "preview" ? true : undefined}
-      >
-        <input type="hidden" name="id" value={campaign.id} />
-        <input type="hidden" name="name" value={name} />
-        <input type="hidden" name="subject" value={subject} />
-        <input type="hidden" name="previewText" value={previewText} />
-        <input type="hidden" name="senderId" value={senderId} />
-        <input type="hidden" name="departmentId" value={departmentId} />
-        <input type="hidden" name="blocks" value={JSON.stringify(blocks)} />
-        <input type="hidden" name="variables" value={JSON.stringify(validDefs)} />
-        <input type="hidden" name="audience" value={audiencePayload} />
-        <input type="hidden" name="mode" value={mode} />
-        <input type="hidden" name="scheduledAtIso" value={iso} />
+    <section
+      aria-label="Campaign editor"
+      className="flex h-[calc(100dvh-8rem)] min-h-[560px] flex-col overflow-hidden rounded-2xl border border-mist bg-mist-50 text-sm text-ink sm:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-5rem)]"
+    >
+      {step !== "preview" ? (
+        <header className="flex items-center gap-3 border-b border-mist bg-white px-4 py-2.5 sm:px-5">
+          <h1 className="max-w-[40%] truncate text-[15px] font-bold text-ink max-[760px]:hidden">{campaign.name}</h1>
+          <nav aria-label="Steps" className="flex gap-1">
+            {steps.map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                aria-current={step === k ? "step" : undefined}
+                onClick={() => setStep(k)}
+                className={cn("rounded-full px-3.5 py-1.5 text-[13px]", step === k ? "bg-brand-50 font-semibold text-brand-800" : "text-ink-soft hover:bg-mist-100")}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+          <span role="status" className="ml-auto text-xs text-ink-muted max-[760px]:hidden">{statusText}</span>
+        </header>
+      ) : null}
 
-        <div role="tablist" aria-label="Campaign sections" className="mb-6 flex flex-wrap gap-2">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              id={`tab-${t.key}`}
-              aria-selected={tab === t.key}
-              aria-controls={`panel-${t.key}`}
-              onClick={() => goTo(t.key)}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500",
-                tab === t.key ? "bg-brand-700 text-white" : "bg-white text-ink-soft ring-1 ring-mist hover:bg-mist-100",
-              )}
-            >
-              {t.label}
-              {issues[t.key] ? <><AlertTriangle className={cn("h-3.5 w-3.5", tab === t.key ? "text-white" : "text-warning")} aria-hidden="true" /><span className="sr-only">needs attention</span></> : null}
-            </button>
-          ))}
-        </div>
+      {step === "setup" ? (
+        <SetupStep
+          senders={props.senders} senderId={senderId} onSender={setSenderId}
+          audienceValue={audienceValue} audienceOptions={audienceOptions} onAudience={onAudience} reach={reach}
+          subject={subject} onSubject={setSubject} preheader={preheader} onPreheader={setPreheader}
+          onNext={() => setStep("content")}
+        />
+      ) : null}
 
-        {/* ── Details ─────────────────────────────────────────────────── */}
-        <div role="tabpanel" id="panel-details" aria-labelledby="tab-details" hidden={tab !== "details"} className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-          <Card className="self-start">
-            <CardHeader title="Campaign details" description="The basics: what it’s called, what recipients see, and who it comes from." />
-            <div className="space-y-5 p-6">
-              <Field label="Campaign name" htmlFor="c-name" hint="Only your team sees this. It’s also the title if you save this as a template."><Input id="c-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} /></Field>
-              <VariableField label="Subject line" value={subject} onChange={setSubject} options={variableOptions} maxLength={200} />
-              <VariableField label="Preview text" value={previewText} onChange={setPreviewText} options={variableOptions} maxLength={200} hint="The short line shown beside the subject in many inboxes." />
-              <Field label="Send from" htmlFor="c-sender" error={senderProblem && senders.length ? senderProblem : undefined} hint="Your work email, or one of your aliases.">
-                <Select id="c-sender" value={senderId} onChange={(e) => setSenderId(e.target.value)}>
-                  <option value="">{senders.length ? "Choose where this comes from…" : "No work email yet"}</option>
-                  {(["primary", "alias"] as const).map((kind) => {
-                    const group = senders.filter((s) => s.kind === kind);
-                    if (!group.length) return null;
-                    return (
-                      <optgroup key={kind} label={kind === "primary" ? "Your work email" : "Your aliases"}>
-                        {group.map((s) => (
-                          <option key={s.id} value={s.id} disabled={!usable(s) && s.id !== senderId}>
-                            {s.fromName} &lt;{s.email}&gt;{s.status !== "active" ? " (deactivated)" : !s.domainReady ? " (domain not verified)" : ""}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </Select>
-              </Field>
-              {departments.length > 0 ? (
-                <Field label="Department" htmlFor="c-dept" hint="Only members of this department, and people with access to every department, can see this campaign.">
-                  <Select id="c-dept" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
-                    {orgWideAllowed ? <option value="">Whole organization</option> : null}
-                    {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </Select>
-                </Field>
-              ) : null}
-            </div>
-          </Card>
-
-          <div className="space-y-6">
-            <Card>
-              <CardHeader title="Sender" description="Who recipients see this email coming from." />
-              <div className="space-y-3 p-6 text-sm">
-                {sender ? (
-                  <>
-                    <p className="font-semibold text-ink">{sender.fromName}</p>
-                    <p className="break-all text-ink-soft">{sender.email}</p>
-                    <p className={cn("flex items-center gap-2 text-xs font-semibold", senderProblem ? "text-warning" : "text-success")}>
-                      {senderProblem ? <AlertTriangle className="h-4 w-4" aria-hidden="true" /> : <Check className="h-4 w-4" aria-hidden="true" />}
-                      {senderProblem ?? `Ready: ${sender.domain} passed DKIM, SPF and DMARC.`}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-ink-soft">{senders.length ? "Pick a sender to see its details." : "You don’t have a work email yet. Set one under Team (the owner can do this for you)."}</p>
-                )}
-                <p className="flex items-start gap-2 rounded-xl bg-mist-50 p-3 text-xs text-ink-soft">
-                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
-                  <span>Aliases are extra addresses on your work email’s domain. They’re added by the owner under Team, and they can’t receive email: replies go to the mailbox at your email host.</span>
-                </p>
+      {step === "content" ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex flex-wrap items-center gap-2 px-4 pb-1 pt-3">
+                <Button size="sm" variant="outline" disabled={historyLength === 0} onClick={undo}>Undo</Button>
+                <Button size="sm" variant="outline" onClick={() => openPanel(custom ? "blocks" : "tpl")}>{custom ? "Add content" : "Change template"}</Button>
+                <span className="flex-1" />
+                <Button size="sm" variant="outline" loading={testing} onClick={sendTest}>Send test</Button>
               </div>
-            </Card>
-            <Card>
-              <CardHeader title="Variables you can use" description="Add them to the subject, preview text and content with Insert variable." />
-              <ul className="flex flex-wrap gap-2 p-6">
-                {variableOptions.map((o) => <li key={o.key}><code className="rounded-lg bg-mist-100 px-2 py-1 text-xs text-ink-soft">{`{{${o.key}}}`}</code></li>)}
-              </ul>
-              <div className="border-t border-mist px-6 py-3"><Button type="button" variant="ghost" size="sm" onClick={() => goTo("variables")}>Set values and fallbacks</Button></div>
-            </Card>
-          </div>
-        </div>
-
-        {/* ── Audience ────────────────────────────────────────────────── */}
-        <div role="tabpanel" id="panel-audience" aria-labelledby="tab-audience" hidden={tab !== "audience"} className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-          <Card className="self-start">
-            <CardHeader title="Choose recipients" description="Combine lists, people you pick, pasted addresses and imported files. Nobody gets the email twice." />
-            <div className="p-6">
-              <AudiencePicker audience={audience} setAudience={setAudience} lists={listOptions} totalSubscribed={totalSubscribed} canImport={can.viewContacts} canCreateContacts={can.createContacts} actions={actions.audience} />
+              <div className="mx-auto mb-2 mt-1 rounded-full border border-mist bg-white px-3 py-0.5 text-xs text-ink-muted">
+                {design.tpl === "custom" ? "Custom layout" : `${TEMPLATE_NAMES[design.tpl]} template`}
+              </div>
+              <Canvas
+                design={design} ctx={ctx} selBlock={sel} selSlot={slot}
+                onSlot={selectSlot} onBlock={selectBlock}
+                onInsert={(i) => { setPend(i); setSel(null); setSlot(null); openPanel("blocks"); }}
+                onMove={moveBlock} onRemove={removeBlock} onReorder={reorder}
+              />
             </div>
-          </Card>
-          <div className="lg:sticky lg:top-6 lg:self-start">
-            <AudienceSummary audience={audience} setAudience={setAudience} lists={listOptions} totalSubscribed={totalSubscribed} size={size} sizing={sizing} />
+            <SidePanel
+              open={open} tab={tab} setTab={setTab} onClose={() => setOpen(false)}
+              design={design} logo={doc.logo} selBlock={selBlock} slot={slot}
+              mutate={mutate} addBlock={addBlock} askLayout={askLayout}
+              pickImage={pickImage} uploading={uploading}
+              variables={variableList} fallbacks={fallbacks} setFallback={setFallback} insertVariable={insertVariable}
+              pickPreset={pickPreset}
+            />
           </div>
-        </div>
-
-        {/* ── Content ─────────────────────────────────────────────────── */}
-        <div role="tabpanel" id="panel-content" aria-labelledby="tab-content" hidden={tab !== "content"} className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-          <div className="self-start"><BlockEditor blocks={blocks} setBlocks={setBlocks} variableOptions={variableOptions} /></div>
-          <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-            <Card>
-              <CardHeader title="Check your email" description="See it exactly as recipients will, on desktop and mobile." />
-              <div className="p-6"><Button type="button" variant="secondary" onClick={openPreview}><Eye className="h-4 w-4" aria-hidden="true" />Open preview</Button></div>
-            </Card>
-            <Card>
-              <CardHeader title="Variables in this email" description={report.used.length ? undefined : "None yet. Use Insert variable beside any text field."} />
-              {report.used.length ? (
-                <ul className="flex flex-wrap gap-2 p-6">
-                  {report.used.map((k) => {
-                    const bad = report.undefinedKeys.includes(k);
-                    return <li key={k}><code className={cn("rounded-lg px-2 py-1 text-xs", bad ? "bg-warning-soft text-warning" : "bg-mist-100 text-ink-soft")}>{`{{${k}}}`}</code></li>;
-                  })}
-                </ul>
-              ) : null}
-              {!variablesOk ? <p className="border-t border-mist px-6 py-3 text-xs text-warning">{checks[4].detail} <button type="button" onClick={() => goTo("variables")} className="font-semibold underline underline-offset-2">Fix on the Variables tab</button></p> : null}
-            </Card>
-            {can.saveTemplate ? (
-              <Card>
-                <CardHeader title="Save as template" description="Keep this layout, with its variables, for future campaigns." />
-                <div className="space-y-3 p-6">
-                  <p className="text-sm text-ink-soft">It’s saved with this campaign’s title: <strong className="text-ink">{name.trim() || "Untitled template"}</strong>. Change the title on the Details tab. You can duplicate and rename it later on the Templates page.</p>
-                  <Button type="button" variant="secondary" onClick={saveAsTemplate} disabled={savingTpl}><BookmarkPlus className="h-4 w-4" aria-hidden="true" />{savingTpl ? "Saving…" : "Save as template"}</Button>
-                </div>
-              </Card>
+          <div className="flex items-center justify-end gap-2 border-t border-mist bg-white px-4 py-2.5">
+            {!props.canSend ? <span className="mr-auto text-xs text-ink-muted">You can prepare this campaign, but sending is limited to people with permission to send. Ask a manager or administrator to send it.</span> : null}
+            <Button size="sm" variant="outline" onClick={() => setStep("preview")}>Preview</Button>
+            {props.canSend ? (
+              <div ref={menuRef} className="relative flex">
+                <Button size="sm" className="rounded-r-none" onClick={() => openReview("now")}>Send now</Button>
+                <Button size="sm" className="rounded-l-none border-l border-white/30 !px-2.5" aria-label="More send options" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>▾</Button>
+                {menu ? (
+                  <div role="menu" className="absolute bottom-[calc(100%+6px)] right-0 z-20 w-60 rounded-xl border border-mist bg-white p-1 shadow-lg shadow-night/10">
+                    <button type="button" role="menuitem" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-mist-100" onClick={() => openReview("now")}>
+                      Send now<small className="block text-xs text-ink-muted">Review, then send right away</small>
+                    </button>
+                    <button type="button" role="menuitem" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-mist-100" onClick={() => { setMenu(false); setScheduling(true); }}>
+                      Schedule<small className="block text-xs text-ink-muted">Pick a date, time and timezone</small>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>
+      ) : null}
 
-        {/* ── Variables ───────────────────────────────────────────────── */}
-        <div role="tabpanel" id="panel-variables" aria-labelledby="tab-variables" hidden={tab !== "variables"} className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-          <div className="self-start"><VariablesEditor variables={variables} setVariables={setVariables} contactFieldKeys={contactFieldKeys} /></div>
-          <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-            <PreviewAsCard contacts={contacts} selectedId={previewAs} onSelect={setPreviewAs} onContactSaved={(c) => setContacts((cs) => cs.map((x) => (x.id === c.id ? c : x)))} />
-            <Card>
-              <CardHeader title="Variables check" description="Everything the email uses must have a value or a fallback." />
-              <div className="p-6 text-sm">
-                {variablesOk ? (
-                  <p className="flex items-center gap-2 font-semibold text-success"><Check className="h-4 w-4" aria-hidden="true" />{report.used.length ? "Every variable can be filled in." : "No variables used."}</p>
-                ) : (
-                  <ul className="space-y-2 text-warning">
-                    {report.malformed.map((m) => <li key={m}>Can’t read <code className="rounded bg-warning-soft px-1">{m}</code>. Variable names use letters, numbers and _ only.</li>)}
-                    {report.undefinedKeys.map((k) => <li key={k}><code className="rounded bg-warning-soft px-1">{`{{${k}}}`}</code> has no value or fallback. Define it here, or write {`{{${k}|friend}}`}.</li>)}
-                  </ul>
-                )}
-              </div>
-            </Card>
-          </div>
-        </div>
+      {step === "preview" && preview ? (
+        <PreviewStep
+          single={preview.single} compare={preview.compare} preheader={preheader}
+          contacts={[...contacts.map((c) => ({ id: c.id, label: contactLabel(c) })), { id: NO_CONTACT, label: "No contact data (fallbacks)" }]}
+          contactId={contactId}
+          onContact={(id) => { pickedNone.current = id === NO_CONTACT; setContactId(id); }}
+          comparing={comparing} onCompare={() => setComparing((c) => !c)}
+          device={device} onDevice={setDevice} dark={dark} onDark={() => setDark((d) => !d)}
+          onBack={() => setStep("content")}
+          onContinue={props.canSend ? () => { setStep("content"); openReview("now"); } : undefined}
+        />
+      ) : null}
 
-        {/* ── Review & send ───────────────────────────────────────────── */}
-        <div role="tabpanel" id="panel-review" aria-labelledby="tab-review" hidden={tab !== "review"} className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-          <div className="space-y-6 self-start">
-            <Card>
-              <CardHeader title="Ready to send?" description={ready ? "Everything checks out." : "Fix what’s marked before sending."} />
-              <ul className="divide-y divide-mist">
-                {checks.map((c) => (
-                  <li key={c.key} className="flex items-start gap-3 px-6 py-3.5 text-sm">
-                    <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full", c.ok ? "bg-success/15 text-success" : c.pending ? "bg-mist-100 text-ink-muted" : "bg-warning-soft text-warning")} aria-hidden="true">
-                      {c.ok ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-ink">{c.label}</p>
-                      <p className={cn("break-words text-xs", c.ok ? "text-ink-muted" : "text-ink-soft")}>{c.detail}</p>
-                    </div>
-                    {!c.ok && c.tab ? <Button type="button" variant="ghost" size="sm" onClick={() => goTo(c.tab!)}>Fix</Button> : null}
-                    {!c.ok && c.href ? <Link href={c.href} className="text-xs font-semibold text-brand-800 underline underline-offset-2">Open</Link> : null}
-                  </li>
-                ))}
-              </ul>
-            </Card>
-            {can.send ? (
-              <Card>
-                <CardHeader title="When to send" description="The unsubscribe link and your business address are added to the footer automatically." />
-                <div className="space-y-5 p-6">
-                  <div className="flex flex-wrap gap-6 text-sm">
-                    <label className="flex items-center gap-2"><input type="radio" checked={mode === "now"} onChange={() => setMode("now")} className="accent-brand-700" />Send now</label>
-                    <label className="flex items-center gap-2"><input type="radio" checked={mode === "later"} onChange={() => setMode("later")} className="accent-brand-700" />Schedule</label>
-                  </div>
-                  {mode === "later" ? (
-                    <Field label="Send at (your local time)" htmlFor="when">
-                      <Input id="when" type="datetime-local" onChange={(e) => setIso(e.target.value ? new Date(e.target.value).toISOString() : "")} className="max-w-xs" />
-                    </Field>
-                  ) : null}
-                </div>
-              </Card>
-            ) : (
-              <p className="rounded-2xl border border-mist bg-mist-50 p-4 text-sm text-ink-soft">You can prepare this campaign, but sending is limited to people with permission to send. Ask a manager or administrator to send it.</p>
-            )}
-          </div>
+      <input ref={fileInput} type="file" accept="image/*" className="hidden" onChange={onFile} aria-hidden="true" tabIndex={-1} />
 
-          <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-            <Card>
-              <CardHeader title="Summary" />
-              <dl className="space-y-3 p-6 text-sm">
-                <div><dt className="text-xs text-ink-muted">Campaign</dt><dd className="break-words font-semibold text-ink">{name || "Untitled campaign"}</dd></div>
-                <div><dt className="text-xs text-ink-muted">Subject</dt><dd className="break-words text-ink">{subject ? previewSubject(subject, vars, validDefs) : "—"}</dd></div>
-                <div><dt className="text-xs text-ink-muted">From</dt><dd className="break-words text-ink">{fromLabel || "—"}</dd></div>
-                <div><dt className="text-xs text-ink-muted">Audience</dt><dd className="text-ink">{size === null ? "Counting…" : people(size)}{audience.mode === "all" ? " (everyone subscribed)" : ""}</dd></div>
-              </dl>
-            </Card>
-            <Card>
-              <CardHeader title="Other actions" />
-              <div className="flex flex-wrap gap-3 p-6">
-                <Button type="submit" formAction={actions.test} variant="secondary">Send test to me</Button>
-                <Button
-                  type="submit"
-                  formAction={actions.remove}
-                  variant="ghost"
-                  onClick={async (e) => {
-                    const button = e.currentTarget;
-                    const form = button.form;
-                    e.preventDefault();
-                    const ok = await confirm({ title: "Delete this draft?", description: "The draft and everything you’ve written in it are removed. This can’t be undone.", confirmLabel: "Delete draft", tone: "danger" });
-                    if (ok) form?.requestSubmit(button);
-                  }}
-                >
-                  Delete draft
-                </Button>
-              </div>
-            </Card>
-          </div>
-        </div>
-
-        {/* ── Actions: one bar, always in reach ───────────────────────── */}
-        <div className="sticky bottom-4 z-20 mt-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-mist bg-white/95 p-3 shadow-lg backdrop-blur">
-          <div>{index > 0 ? <Button type="button" variant="ghost" onClick={() => goTo(TABS[index - 1].key)}>Back</Button> : null}</div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" formAction={actions.save} variant="secondary">Save draft</Button>
-            <span ref={previewSlot}><Button type="button" variant="secondary" onClick={openPreview}><Eye className="h-4 w-4" aria-hidden="true" />Preview</Button></span>
-            {last ? (
-              can.send ? (
-                <Button type="submit" formAction={actions.submit} onClick={confirmAndSubmit} disabled={!ready}>{mode === "now" ? "Send campaign" : "Schedule campaign"}</Button>
-              ) : null
-            ) : (
-              <Button type="button" onClick={() => goTo(TABS[index + 1].key)}>Continue<ChevronRight className="h-4 w-4" aria-hidden="true" /></Button>
-            )}
-          </div>
-        </div>
-      </form>
-
-      {/* Sibling of the form, not a child: its buttons must never submit the campaign. */}
-      {view === "preview" ? <CampaignPreview doc={previewDoc} subject={previewSubject(subject, vars, validDefs)} from={fromLabel} asLabel={asLabel} onBack={closePreview} /> : null}
-    </>
+      <ScheduleDialog open={scheduling} onClose={() => setScheduling(false)} onContinue={continueSchedule} />
+      <SwitchDialog target={switchTo} design={design} onClose={() => setSwitchTo(null)} onConfirm={() => { if (switchTo) applyLayout(switchTo); }} />
+      <ReviewDialog
+        open={review !== null} mode={review?.mode ?? "now"} onClose={() => setReview(null)}
+        checks={checks} onFix={fix}
+        subject={subject} preheader={preheader} senderName={sender?.fromName ?? ""} audienceName={audienceName}
+        size={chosen ? reach : 0} scheduleLabel={sched?.label ?? null} scan={scan} hasLogo={Boolean(doc.logo.src)}
+        onCheckOn={(v) => { setReview(null); setStep("preview"); if (v === "dark") setDark(true); else setDevice(v); }}
+        phase={phase} outcome={outcome} onSend={send} onDone={() => router.refresh()}
+      />
+    </section>
   );
 }

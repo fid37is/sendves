@@ -7,7 +7,7 @@ export function NoAccess({ title, what }: { title: string; what: string }) {
       <PageHeader title={title} />
       <EmptyState
         title="You don’t have access to this page"
-        description={`Your role doesn’t include ${what}. Ask an organization owner or administrator if you need it.`}
+        description={`Your role doesn’t include ${what}. Ask an organization owner if you need it.`}
       />
     </>
   );

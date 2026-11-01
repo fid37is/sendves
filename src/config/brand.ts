@@ -100,3 +100,36 @@ export const emailTheme = {
   pageBackground: palette.mist[100],
   card: "#FFFFFF",
 } as const;
+
+/**
+ * Colours of the CAMPAIGN EMAIL itself: the editor's canvas, the preview and the HTML that is sent.
+ * Mail clients cannot read CSS variables, so these are plain hex. The product's own screens never
+ * use them; they use the palette above.
+ */
+export const emailCanvas = {
+  page: "#F4F5F7",
+  card: "#FFFFFF",
+  ink: "#1D2129",
+  muted: "#6B7280",
+  rule: "#E5E7EB",
+  onColor: "#FFFFFF",
+  /** Placeholders shown only while editing ("Add your logo", "Add banner"). */
+  placeholderBorder: "#B8C2CC",
+  placeholderText: "#6B7280",
+  /** The chip that stands in for {{variables}} while editing. */
+  chipBg: "#DFF1EE",
+  chipInk: "#0B5B54",
+  /** The email as dark-mode mail apps tend to show it (used by the preview's dark theme). */
+  dark: { page: "#101216", card: "#1B1D21", ink: "#E6E8EC", muted: "#9AA0AA", rule: "#33373E" },
+  /** The colours a campaign can use for buttons, countdown tiles and social icons. The first is the default. */
+  brandColors: ["#0F766E", "#1D4ED8", "#B45309", "#BE123C"],
+  /** The preset pictures for Image blocks, products and the banner: [from, to]. */
+  gradients: [
+    ["#0F766E", "#34D399"],
+    ["#334155", "#94A3B8"],
+    ["#B45309", "#FBBF24"],
+    ["#6D28D9", "#A78BFA"],
+    ["#BE123C", "#FB7185"],
+    ["#1D4ED8", "#60A5FA"],
+  ],
+} as const;

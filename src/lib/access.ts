@@ -19,7 +19,7 @@ export type MemberRole = (typeof ROLES)[number];
 export const CAMPAIGN_ROLES = ["marketing", "sales", "operations"] as const;
 export type CampaignRole = (typeof CAMPAIGN_ROLES)[number];
 
-export const ROLE_LABEL: Record<MemberRole, string> = { owner: "Owner (Admin)", marketing: "Marketing", sales: "Sales", operations: "Operations" };
+export const ROLE_LABEL: Record<MemberRole, string> = { owner: "Owner", marketing: "Marketing", sales: "Sales", operations: "Operations" };
 
 export const ROLE_BLURB: Record<MemberRole, string> = {
   owner: "Full control: organization settings, billing, team, domains and permissions.",

@@ -57,6 +57,16 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { error: "Wrong email or password." };
 
+  // Platform administrators sign in on the admin host only. This door treats their account as unknown.
+  const { data: auth } = await supabase.auth.getUser();
+  if (auth.user) {
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", auth.user.id).single();
+    if (profile?.role === "admin") {
+      await supabase.auth.signOut();
+      return { error: "Wrong email or password." };
+    }
+  }
+
   redirect(next);
 }
 

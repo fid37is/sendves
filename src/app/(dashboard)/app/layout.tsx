@@ -9,9 +9,6 @@ import { switchWorkspaceAction } from "@/app/(dashboard)/app/team/actions";
 import { FlashToast } from "@/components/ui/flash-toast";
 import { AppShell, type ShellNavItem } from "@/components/layout/app-shell";
 
-/** The dashboard is per-user: never pre-render it at build time. */
-export const dynamic = "force-dynamic";
-
 /** `needs` hides a page from people whose role doesn't include it. The pages and actions check again on the server. */
 const nav: (ShellNavItem & { needs?: Permission })[] = [
   { label: "Overview", href: "/app", icon: "home" },
@@ -29,6 +26,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const ctx = await getContext();
   if (!ctx) redirect("/login");
   const user = ctx.user;
+  // The customer app is for customers. A platform admin who lands here is sent to the admin console.
+  if (user.role === "admin") redirect(env.adminUrl);
   // Without a workspace (service key missing) show everything, as before: pages show their own empty states.
   const items = nav.filter((i) => !i.needs || !ctx.access || can(ctx.access, i.needs)).map(({ needs: _needs, ...item }) => item);
   const collapsed = cookies().get(SIDEBAR_COOKIE)?.value === "1";
@@ -43,8 +42,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
       organizations={ctx.memberships.map((m) => ({ id: m.id, name: m.name }))}
       activeOrganizationId={ctx.workspace?.id}
       switchOrganization={switchWorkspaceAction}
-      // The admin console lives on its own host. Only admins ever see this link.
-      switchLink={user.role === "admin" ? { label: "Open admin console", href: env.adminUrl } : undefined}
     >
       <FlashToast />
       {children}
