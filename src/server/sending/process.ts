@@ -135,6 +135,12 @@ export async function runTick(opts: { budgetMs?: number } = {}): Promise<{ activ
   const started = Date.now();
   const settings = await loadSettings(db);
 
+  // Platform-wide pause: nothing is claimed or sent, everything stays queued. Health checks still run.
+  if (settings.sending_paused) {
+    await evaluateHealth(db, settings);
+    return { activated: 0, sent: 0, failed: 0 };
+  }
+
   await db.rpc("release_stuck_sends");
   const activated = await activateScheduled(db);
 

@@ -31,6 +31,9 @@ export type PanelProps = {
   askLayout: (k: Layout) => void;
   pickImage: (target: UploadTarget) => void;
   uploading: boolean;
+  /** May keep the current email as a template (template permission). */
+  canSaveTemplate: boolean;
+  onSaveTemplate: () => void;
   /** Called after a choice that changes the email (on a phone this closes the panel so the result is visible). */
   afterPick: () => void;
   /** Every variable the email can use, with how it is named. */
@@ -305,16 +308,22 @@ export function SidePanel(p: PanelProps) {
             </div>
           </button>
         ))}
-        {custom ? (
-          <button type="button" aria-current="true" onClick={() => p.askLayout("custom")} className="mb-2 block w-full rounded-lg border border-brand-700 bg-brand-50 p-2.5 text-left">
-            <b className="text-ink">Custom layout</b><small className="block text-xs text-ink-muted">Free blocks, drag to reorder</small>
+        <button
+          type="button"
+          onClick={() => p.askLayout("custom")}
+          aria-current={custom ? "true" : undefined}
+          className={cn("mb-2 block w-full rounded-lg border p-2.5 text-left", custom ? "border-brand-700 bg-brand-50" : "border-mist bg-white hover:border-brand-500")}
+        >
+          <div className="flex items-center gap-3">
+            <LayoutThumb layout="custom" />
+            <div><b className="text-ink">Custom layout</b><small className="block text-xs text-ink-muted">Free blocks, drag to reorder</small></div>
+          </div>
+        </button>
+        {p.canSaveTemplate ? (
+          <button type="button" onClick={p.onSaveTemplate} className="mb-2 block w-full rounded-lg border border-dashed border-mist bg-white p-2.5 text-left hover:border-brand-500">
+            <b className="text-ink">Save as template…</b><small className="block text-xs text-ink-muted">Keep this layout and content for future campaigns</small>
           </button>
-        ) : (
-          <>
-            <Button size="sm" variant="outline" onClick={() => p.askLayout("custom")}>Customize layout…</Button>
-            <Hint>Switches to free-form blocks. You’ll see what carries over first.</Hint>
-          </>
-        )}
+        ) : null}
         {D.tray.length ? <Hint>Set aside from your custom layout: {D.tray.map((b) => BLOCK_LABELS[b.t]).join(", ")}. They return if you customize the layout again.</Hint> : null}
       </div>
     </>

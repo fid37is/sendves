@@ -3,6 +3,7 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FormActions } from "@/components/ui/form-actions";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
@@ -29,8 +30,8 @@ function NameEditor({ contact, onSaved }: { contact: PreviewContact; onSaved: (c
       if (!res.ok) { toast.error(res.error ?? "Couldn’t save that contact."); return; }
       onSaved({ ...contact, first_name: first.trim() || null, last_name: last.trim() || null });
       toast.success("Contact updated.");
-    } catch {
-      toast.error("Couldn’t save. Try again.");
+    } catch (e) {
+      toast.fail("Couldn’t save that contact. Try again.", e);
     } finally {
       setSaving(false);
     }
@@ -44,7 +45,9 @@ function NameEditor({ contact, onSaved }: { contact: PreviewContact; onSaved: (c
         <Field label="First name" htmlFor="pv-first" hint="Fills {{first_name}}"><Input id="pv-first" value={first} onChange={(e) => setFirst(e.target.value)} maxLength={80} /></Field>
         <Field label="Last name" htmlFor="pv-last" hint="Fills {{last_name}}"><Input id="pv-last" value={last} onChange={(e) => setLast(e.target.value)} maxLength={80} /></Field>
       </div>
-      <Button type="button" size="sm" className="mt-3" disabled={!changed || saving} onClick={save}>{saving ? "Saving…" : "Save names"}</Button>
+      <FormActions className="mt-3">
+        <Button type="button" size="sm" loading={saving} disabled={!changed} onClick={save}>Save names</Button>
+      </FormActions>
     </div>
   );
 }

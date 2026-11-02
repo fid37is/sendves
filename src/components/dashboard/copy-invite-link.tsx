@@ -28,8 +28,8 @@ export function CopyInviteLink({ inviteId }: { inviteId: string }) {
         // Clipboard blocked: show the link so it can be copied by hand.
         setManual(res.link);
       }
-    } catch {
-      toast.error("Couldn’t get the link.");
+    } catch (e) {
+      toast.fail("Couldn’t get the link. Try again.", e);
     } finally {
       setBusy(false);
     }

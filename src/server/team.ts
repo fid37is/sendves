@@ -44,6 +44,18 @@ export async function sendInviteEmail(args: { inviteId: string; to: string; logi
   return sendPlatformEmail(args.to, `You’re invited to ${args.organization} on Sendves`, html, text);
 }
 
+/** Tells a new platform admin to set their password. */
+export async function sendAdminInviteEmail(args: { to: string; name: string; invitedBy: string; link: string }): Promise<boolean> {
+  const html = shell(
+    `<h2 style="margin:0 0 12px;">You’re now a Sendves admin</h2>` +
+    `<p style="line-height:1.6;">Hi ${escapeHtml(args.name)}, ${escapeHtml(args.invitedBy)} added you as a platform administrator. Choose your password to get started.</p>` +
+    button(args.link, "Set my password") +
+    `<p style="font-size:13px;color:#475569;line-height:1.6;">Then sign in on the admin site. You’ll be asked to set up an authenticator app the first time. This link works once and expires soon.</p>`,
+  );
+  const text = `${args.invitedBy} added you as a Sendves platform administrator. Set your password: ${args.link}`;
+  return sendPlatformEmail(args.to, "You’re now a Sendves admin", html, text);
+}
+
 /** Emails a password-recovery link to a person's recovery email. */
 export async function sendRecoveryEmail(args: { to: string; loginEmail: string; link: string }): Promise<boolean> {
   const html = shell(

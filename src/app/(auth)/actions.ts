@@ -30,6 +30,14 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
   if (password !== confirm) return { error: "The passwords don’t match." };
   if (!isSupabaseConfigured) return { error: NOT_CONFIGURED };
 
+  // Platform sign-up rules, set by an admin: registration can be closed, and some domains blocked.
+  try {
+    const { data: rules } = await createAdminClient().from("platform_settings").select("registrations_open, blocked_email_domains").eq("id", 1).maybeSingle();
+    if (rules?.registrations_open === false) return { error: "Sign-ups are closed right now. Please try again later." };
+    const domain = email.split("@")[1] ?? "";
+    if (((rules?.blocked_email_domains ?? []) as string[]).includes(domain)) return { error: "That email domain isn’t accepted. Use a different email address." };
+  } catch { /* settings unavailable: the database enforces the same rules */ }
+
   const supabase = createClient();
   const { error } = await supabase.auth.signUp({
     email,
@@ -120,6 +128,16 @@ export async function resetPasswordAction(_prev: FormState, formData: FormData):
   const supabase = createClient();
   const { error } = await supabase.auth.updateUser({ password });
   if (error) return { error: error.message };
+
+  // Platform admins sign in on the admin site only: send them there instead of the customer app.
+  const { data: auth } = await supabase.auth.getUser();
+  if (auth.user) {
+    const { data: profile } = await createAdminClient().from("profiles").select("role").eq("id", auth.user.id).maybeSingle();
+    if (profile?.role === "admin") {
+      await supabase.auth.signOut();
+      redirect(`${env.adminUrl}/login`);
+    }
+  }
 
   redirect("/app");
 }

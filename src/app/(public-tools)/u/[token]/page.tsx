@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { CircleCheck } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CircleCheck, Heart } from "lucide-react";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseUnsubscribeToken } from "@/lib/tokens";
@@ -9,7 +9,7 @@ import { unsubscribeAction } from "./actions";
 export const metadata: Metadata = { title: "Unsubscribe", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
-export default async function UnsubscribePage({ params, searchParams }: { params: { token: string }; searchParams: { done?: string } }) {
+export default async function UnsubscribePage({ params, searchParams }: { params: { token: string }; searchParams: { done?: string; kept?: string } }) {
   const token = decodeURIComponent(params.token);
   let sender = "";
   let valid = false;
@@ -40,6 +40,17 @@ export default async function UnsubscribePage({ params, searchParams }: { params
     );
   }
 
+  if (searchParams.kept) {
+    return (
+      <Shell>
+        <Heart className="mx-auto h-12 w-12 text-brand-700" aria-hidden="true" />
+        <h1 className="mt-4 text-2xl font-extrabold text-ink">Glad you’re staying</h1>
+        <p className="mt-3 text-ink-soft">Nothing has changed. You’ll keep receiving emails from {sender || "this sender"}.</p>
+        <p className="mt-3 text-sm text-ink-muted">You can unsubscribe at any time using the link at the bottom of any email. You can close this page now.</p>
+      </Shell>
+    );
+  }
+
   return (
     <Shell>
       <h1 className="text-2xl font-extrabold text-ink">Unsubscribe</h1>
@@ -48,6 +59,7 @@ export default async function UnsubscribePage({ params, searchParams }: { params
         <input type="hidden" name="token" value={token} />
         <Button type="submit" size="lg" className="w-full">Yes, unsubscribe me</Button>
       </form>
+      <ButtonLink href={`/u/${encodeURIComponent(token)}?kept=1`} variant="outline" size="lg" className="mt-3 w-full">No, keep me subscribed</ButtonLink>
     </Shell>
   );
 }

@@ -191,8 +191,8 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
       }
       setConsent(false);
       close();
-    } catch {
-      toast.error("Couldn’t add contacts.");
+    } catch (e) {
+      toast.fail("Couldn’t add the contacts. Try again.", e);
     } finally {
       setSaving(false);
     }
@@ -218,7 +218,7 @@ export function AddContactsDrawer({ open, onOpenChange, lists, newListName, defa
           </label>
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={cancel} disabled={saving}>Cancel</Button>
-            <Button type="submit" form={formId} disabled={saving}>{submitLabel}</Button>
+            <Button type="submit" form={formId} loading={saving}>{submitLabel}</Button>
           </div>
         </div>
       }

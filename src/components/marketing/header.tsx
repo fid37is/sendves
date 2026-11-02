@@ -32,6 +32,7 @@ export function SiteHeader() {
   }, []);
 
   return (
+    <>
     <header
       className={cn(
         "sticky top-0 z-40 border-b transition-all duration-300",
@@ -92,6 +93,10 @@ export function SiteHeader() {
         </div>
       </div>
 
+    </header>
+
+    {/* Rendered outside <header>: once the header gets backdrop-blur it becomes the containing block for
+        fixed children, which squashed this menu into the header's height after scrolling. */}
       {open ? (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
           <button type="button" className="animate-fade-in absolute inset-0 bg-ink/50 backdrop-blur-[2px]" onClick={() => setOpen(false)} aria-label="Close menu" />
@@ -132,6 +137,6 @@ export function SiteHeader() {
           </div>
         </div>
       ) : null}
-    </header>
+    </>
   );
 }

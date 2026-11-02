@@ -9,7 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "NODE_OPTIONS=--conditions=react-server tsx --test tests/*.test.ts",
-    "worker": "tsx src/server/workers/run.ts"
+    "worker": "tsx --conditions=react-server --env-file=.env.local src/server/workers/run.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.600.0",

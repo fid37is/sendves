@@ -16,8 +16,9 @@ import type { AudienceOption, SenderRow } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import type { EditorPayload, PreviewContact, SaveResult, SubmitInput, SubmitResult, TestResult } from "@/app/(dashboard)/app/campaigns/actions";
 import type { IngestResult } from "@/server/audience";
+import type { SaveTemplateResult } from "@/app/(dashboard)/app/templates/actions";
 import { Canvas } from "@/components/editor/canvas";
-import { ReviewDialog, ScheduleDialog, SwitchDialog, type ScheduleValues, type SendOutcome } from "@/components/editor/dialogs";
+import { ReviewDialog, SaveTemplateDialog, ScheduleDialog, SwitchDialog, type ScheduleValues, type SendOutcome } from "@/components/editor/dialogs";
 import { prepareImage, uploadImage } from "@/components/editor/image";
 import { PreviewStep } from "@/components/editor/preview-step";
 import { SidePanel } from "@/components/editor/side-panel";
@@ -47,6 +48,8 @@ type Props = {
   canSend: boolean;
   /** May add new people to the workspace's contacts (typed or pasted addresses become contacts). */
   canAddContacts: boolean;
+  /** May keep the email as a template (template permission). */
+  canSaveTemplate: boolean;
   actions: {
     autosave: (p: EditorPayload) => Promise<SaveResult>;
     test: (p: EditorPayload) => Promise<TestResult>;
@@ -54,6 +57,7 @@ type Props = {
     previewContacts: (selection: unknown) => Promise<PreviewContact[]>;
     audienceSize: (selection: unknown) => Promise<{ ok: true; size: number } | { ok: false; error: string }>;
     pasteAudience: (input: { text: string; consent: boolean }) => Promise<IngestResult>;
+    saveTemplate: (input: { name: string; description: string; subject: string; previewText: string; design: unknown; variables: unknown }) => Promise<SaveTemplateResult>;
   };
 };
 
@@ -328,6 +332,19 @@ export function CampaignEditor(props: Props) {
   });
 
   const [switchTo, setSwitchTo] = useState<Layout | null>(null);
+  // Keeping the email as a template.
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tplSaving, setTplSaving] = useState(false);
+  const [tplError, setTplError] = useState<string | null>(null);
+  const saveAsTemplate = async (name: string, description: string) => {
+    setTplSaving(true); setTplError(null);
+    try {
+      const r = await actions.saveTemplate({ name, description, subject, previewText: preheader, design, variables });
+      if (r.ok) { setTplOpen(false); toast.success(`Saved “${r.name}” as a template. Find it on the Templates page.`); }
+      else setTplError(r.error);
+    } catch { setTplError("Couldn’t reach the server. Check your connection and try again."); }
+    finally { setTplSaving(false); }
+  };
   const applyLayout = (k: Layout) => {
     mutate((d) => ({ ...d, design: switchLayout(d.design, k) }));
     setSel(null); setSlot(null); setSwitchTo(null); mclose();
@@ -597,7 +614,7 @@ export function CampaignEditor(props: Props) {
               open={open} tab={tab} setTab={setTab} onClose={() => setOpen(false)}
               design={design} logo={doc.logo} selBlock={selBlock} slot={slot}
               mutate={mutate} addBlock={addBlock} askLayout={askLayout}
-              pickImage={pickImage} uploading={uploading} afterPick={mclose}
+              pickImage={pickImage} uploading={uploading} afterPick={mclose} canSaveTemplate={props.canSaveTemplate} onSaveTemplate={() => { setTplError(null); setTplOpen(true); }}
               variables={variableList} fallbacks={fallbacks} setFallback={setFallback} insertVariable={insertVariable}
               pickPreset={pickPreset}
             />
@@ -641,6 +658,7 @@ export function CampaignEditor(props: Props) {
       <input ref={fileInput} type="file" accept="image/*" className="hidden" onChange={onFile} aria-hidden="true" tabIndex={-1} />
 
       <ScheduleDialog open={scheduling} onClose={() => setScheduling(false)} onContinue={continueSchedule} />
+      <SaveTemplateDialog open={tplOpen} defaultName={campaign.name} saving={tplSaving} error={tplError} onClose={() => setTplOpen(false)} onSave={saveAsTemplate} />
       <SwitchDialog target={switchTo} design={design} onClose={() => setSwitchTo(null)} onConfirm={() => { if (switchTo) applyLayout(switchTo); }} />
       <ReviewDialog
         open={review !== null} mode={review?.mode ?? "now"} onClose={() => setReview(null)}

@@ -1,9 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { limitsFor } from "@/config/plan-limits";
 import { canAccessDepartment, canAssignDepartment, type Access } from "@/lib/access";
-import { go } from "@/lib/flash";
 import { requireWorkspace } from "@/lib/workspace";
 import { checkEmail } from "@/lib/validation/email";
 import { parseContactsCsv } from "@/server/imports";
@@ -15,7 +13,7 @@ const MAX_SELECTION = 100;
 
 async function remainingRoom(ctx: Awaited<ReturnType<typeof requireWorkspace>>) {
   const { count } = await ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id);
-  const cap = Math.min(ctx.workspace.max_contacts, limitsFor(ctx.workspace.plan).contacts);
+  const cap = ctx.workspace.max_contacts; // the workspace's own limit: seeded from the plan, adjustable by an admin
   return { used: count ?? 0, room: Math.max(0, cap - (count ?? 0)), cap };
 }
 
@@ -163,20 +161,23 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
   return { added: toInsert.length + alreadyThere.length, message, rowErrors, list };
 }
 
-export async function importContactsAction(formData: FormData) {
-  const back = "/app/contacts/import";
+export type ImportContactsResult = { ok: boolean; message?: string; error?: string; listId?: string };
+
+/** Imports a CSV. Returns the outcome (rather than redirecting) so the import drawer can stay open on a failure. */
+export async function importContactsAction(formData: FormData): Promise<ImportContactsResult> {
+  const back = "/app/contacts";
   const ctx = await requireWorkspace(back, "contacts.manage");
 
-  if (formData.get("consent") !== "on") go(back, "err", "Confirm that your contacts gave you permission to email them.");
+  if (formData.get("consent") !== "on") return { ok: false, error: "Confirm that your contacts gave you permission to email them." };
   const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) go(back, "err", "Choose a CSV file to import.");
-  if (file.size > MAX_BYTES) go(back, "err", "That file is larger than 5 MB. Split it and import in parts.");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a CSV file to import." };
+  if (file.size > MAX_BYTES) return { ok: false, error: "That file is larger than 5 MB. Split it and import in parts." };
 
   const parsed = parseContactsCsv(await file.text());
-  if (parsed.error) go(back, "err", parsed.error);
+  if (parsed.error) return { ok: false, error: parsed.error };
 
   const { room } = await remainingRoom(ctx);
-  if (room <= 0) go(back, "err", "You’ve reached your contact limit. Upgrade your plan to import more.");
+  if (room <= 0) return { ok: false, error: "You’ve reached your contact limit. Upgrade your plan to import more." };
   let rows = parsed.rows;
   const truncated = Math.max(0, rows.length - room);
   rows = rows.slice(0, room);
@@ -187,7 +188,7 @@ export async function importContactsAction(formData: FormData) {
     const { data: own } = UUID_RE.test(listId)
       ? await ctx.db.from("lists").select("id, department_id").eq("id", listId).eq("workspace_id", ctx.workspace.id).maybeSingle()
       : { data: null };
-    if (!own || !canAccessDepartment(ctx.access, (own as { department_id: string | null }).department_id)) go(back, "err", "That list no longer exists. Choose another list.");
+    if (!own || !canAccessDepartment(ctx.access, (own as { department_id: string | null }).department_id)) return { ok: false, error: "That list no longer exists. Choose another list." };
     listId = own?.id ?? "";
   }
   const newList = String(formData.get("newList") ?? "").trim();
@@ -232,7 +233,7 @@ export async function importContactsAction(formData: FormData) {
     truncated ? `${truncated} not imported because you reached your plan limit` : "",
   ].filter(Boolean);
   revalidatePath("/app/contacts");
-  go(listId ? `/app/contacts?list=${listId}` : "/app/contacts", "ok", `${notes.join(", ")}.`);
+  return { ok: true, message: `${notes.join(", ")}.`, listId: listId || undefined };
 }
 
 // ── Lists ───────────────────────────────────────────────────────────

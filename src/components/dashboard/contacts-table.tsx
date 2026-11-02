@@ -5,6 +5,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { FolderInput, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Field, Select } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
@@ -19,6 +21,9 @@ import {
 } from "@/app/(dashboard)/app/contacts/actions";
 
 type PickerMode = "add" | "move";
+
+/** How many list pills a contact row shows before the rest collapse into "+N". */
+const MAX_LIST_PILLS = 2;
 
 type Props = {
   rows: ContactRow[];
@@ -116,6 +121,7 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const someSelected = selected.size > 0 && !allSelected;
   const ids = Array.from(selected);
+  const hasSelection = selected.size > 0;
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -132,14 +138,14 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
     try {
       const res = await action();
       if (!res.ok) {
-        toast.error(res.error ?? "Something went wrong. Try again.");
+        toast.error(res.error ?? "That didn’t work. Try again.");
         return false;
       }
       if (res.message) toast.success(res.message);
       setSelected(new Set());
       return true;
-    } catch {
-      toast.error("Something went wrong.");
+    } catch (e) {
+      toast.fail("That didn’t work. Try again.", e);
       return false;
     } finally {
       setBusy(false);
@@ -169,23 +175,11 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
 
   return (
     <>
-      {selected.size > 0 ? (
-        <div role="region" aria-label="Actions for selected contacts" className="flex flex-wrap items-center gap-3 border-b border-mist bg-brand-50 px-4 py-3">
-          <p className="text-sm font-semibold text-brand-800" aria-live="polite">{selected.size} selected</p>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setPicker("add")} disabled={busy}>Add to list</Button>
-            {current ? <Button size="sm" variant="outline" onClick={() => setPicker("move")} disabled={busy}>Move to another list</Button> : null}
-            {current ? <Button size="sm" variant="outline" onClick={removeFromCurrent} disabled={busy}>Remove from this list</Button> : null}
-            <Button size="sm" variant="danger" onClick={deleteSelected} disabled={busy}>Delete</Button>
-          </div>
-          <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-sm font-semibold text-brand-800 hover:underline">Clear</button>
-        </div>
-      ) : null}
-
       <Table>
         <thead>
-          <tr>
-            <TH className="w-10">
+          {/* A fixed-height row: choosing contacts swaps the column titles for the actions in place, so nothing moves. */}
+          <tr className="h-12">
+            <TH className={cn("w-10", hasSelection && "bg-brand-50")}>
               <input
                 type="checkbox"
                 aria-label="Select all contacts on this page"
@@ -196,7 +190,24 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
                 className="h-4 w-4 accent-brand-700"
               />
             </TH>
-            <TH>Contact</TH><TH>Status</TH><TH>Lists</TH><TH>Added</TH>
+            {hasSelection ? (
+              <TH colSpan={4} className="bg-brand-50 py-0">
+                <div role="region" aria-label="Actions for selected contacts" className="flex items-center gap-3">
+                  <p className="text-sm font-semibold text-brand-800" aria-live="polite">{selected.size} selected</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setPicker("add")} disabled={busy}>Add to list</Button>
+                    {current ? <Button size="sm" variant="outline" onClick={() => setPicker("move")} disabled={busy}>Move to another list</Button> : null}
+                    {current ? <Button size="sm" variant="outline" onClick={removeFromCurrent} disabled={busy}>Remove from this list</Button> : null}
+                    <Button size="sm" variant="danger" onClick={deleteSelected} disabled={busy}>Delete</Button>
+                  </div>
+                  <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-sm font-semibold text-brand-800 hover:underline">Clear</button>
+                </div>
+              </TH>
+            ) : (
+              <>
+                <TH>Contact</TH><TH>Status</TH><TH>Lists</TH><TH>Added</TH>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -215,10 +226,18 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
               <TD><StatusBadge status={c.status} /></TD>
               <TD>
                 {c.lists.length === 0 ? "-" : (
-                  <span className="flex flex-wrap gap-1.5">
-                    {c.lists.map((l) => (
-                      <Link key={l.id} href={`/app/contacts?list=${l.id}`} className="rounded-full bg-mist-100 px-2.5 py-0.5 text-xs font-medium text-ink-soft hover:bg-brand-50 hover:text-brand-800">{l.name}</Link>
+                  // One line per row, however many lists: the first two, then "+N" with the rest in a tooltip.
+                  <span className="flex items-center gap-1.5 whitespace-nowrap">
+                    {c.lists.slice(0, MAX_LIST_PILLS).map((l) => (
+                      <Link key={l.id} href={`/app/contacts?list=${l.id}`} title={l.name} className="max-w-[9rem] truncate rounded-full bg-mist-100 px-2.5 py-0.5 text-xs font-medium text-ink-soft hover:bg-brand-50 hover:text-brand-800">{l.name}</Link>
                     ))}
+                    {c.lists.length > MAX_LIST_PILLS ? (
+                      <Tooltip label={c.lists.slice(MAX_LIST_PILLS).map((l) => l.name).join("\n")} multiline>
+                        <span tabIndex={0} aria-label={`${c.lists.length - MAX_LIST_PILLS} more lists: ${c.lists.slice(MAX_LIST_PILLS).map((l) => l.name).join(", ")}`} className="cursor-default rounded-full bg-mist-100 px-2.5 py-0.5 text-xs font-semibold text-ink-muted outline-none focus-visible:ring-2 focus-visible:ring-brand-600">
+                          +{c.lists.length - MAX_LIST_PILLS}
+                        </span>
+                      </Tooltip>
+                    ) : null}
                   </span>
                 )}
               </TD>

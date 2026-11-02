@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
@@ -42,9 +42,16 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & StyleOptions & { loading?: boolean }) {
   return (
-    <button type={type} className={buttonStyles({ variant, size, className })} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
-      {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-      {children}
+    <button type={type} className={cn(buttonStyles({ variant, size, className }), loading && "relative cursor-wait disabled:opacity-100")} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
+      {/* While loading, the label stays in place (hidden) and the spinner sits on top of it, so the button never changes width. */}
+      {loading ? (
+        <>
+          <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+            <Spinner className={size === "lg" ? "h-6 w-6" : "h-5 w-5"} />
+          </span>
+          <span className="invisible inline-flex items-center justify-center gap-2">{children}</span>
+        </>
+      ) : children}
     </button>
   );
 }

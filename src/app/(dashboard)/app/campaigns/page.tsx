@@ -39,18 +39,19 @@ export default async function CampaignsPage() {
       <Card>
         <Table>
           <thead>
-            <tr><TH>Campaign</TH><TH>Status</TH><TH>Audience</TH><TH>Sent</TH><TH>Click rate</TH><TH>Date</TH><TH className="w-14"><span className="sr-only">Actions</span></TH></tr>
+            <tr><TH>Campaign</TH><TH>Status</TH><TH>Audience</TH><TH>Sent</TH><TH>Delivered</TH><TH>Click rate</TH><TH>Date</TH><TH className="w-14"><span className="sr-only">Actions</span></TH></tr>
           </thead>
           <tbody>
             {campaigns.map((c) => (
               <tr key={c.id}>
                 <TD className="font-semibold text-ink">
-                  <Link href={`/app/campaigns/${c.id}`} className="hover:text-brand-800 hover:underline">{c.name}</Link>
+                  <Link href={`/app/campaigns/${c.id}`} className="hover:text-brand-800 hover:underline" title={c.status === "draft" ? "Continue editing" : "Open the email and its results"}>{c.name}</Link>
                   <span className="block text-xs font-normal text-ink-muted">{c.subject}</span>
                 </TD>
                 <TD><StatusBadge status={c.status} /></TD>
                 <TD>{c.audience}</TD>
-                <TD>{formatNumber(c.sent)}</TD>
+                <TD>{c.status === "draft" ? "-" : formatNumber(c.sent)}</TD>
+                <TD>{c.status === "draft" || !c.sent ? "-" : `${((c.delivered / c.sent) * 100).toFixed(1)}%`}</TD>
                 <TD>{c.clickRate}</TD>
                 <TD>{c.date}</TD>
                 <TD className="text-right">
@@ -73,7 +74,7 @@ export default async function CampaignsPage() {
                 </TD>
               </tr>
             ))}
-            {campaigns.length === 0 ? <EmptyRow cols={7} message="No campaigns yet. Create your first one to see it here." /> : null}
+            {campaigns.length === 0 ? <EmptyRow cols={8} message="No campaigns yet. Create your first one to see it here." /> : null}
           </tbody>
         </Table>
       </Card>

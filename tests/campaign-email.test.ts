@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  applyConditions, auditVariables, countdownParts, defaultDesign, designFromLegacyBlocks, designFromRow, designFromStarter, EMPTY_LOGO,
+  applyConditions, auditVariables, countdownParts, defaultDesign, designFromLegacyBlocks, designFromRow, designFromStarter, EMPTY_LOGO, BUILT_IN_TEMPLATES, TEMPLATE_NAMES, type TemplateKey,
   fillCountdown, layoutRows, newBlock, renderCampaignHtml, reviewChecks, sanitizeDesign, sanitizeLogo, scanContent, scheduleInstant,
   showFor, switchLayout, UNSUBSCRIBE_TOKEN, zonedInstant, type Design,
 } from "../src/lib/email/campaign";
@@ -183,4 +183,17 @@ test("content scan", () => {
   assert.deepEqual(scanContent("A good subject", "pre", d).reasons, []);
   const bad = scanContent("FREE MONEY NOW!! WINNER!!", "", d);
   assert.ok(bad.score >= 60 && bad.reasons.length >= 3);
+});
+
+test("built-in templates are exactly the editor's layouts, each with starting content and a design", () => {
+  assert.deepEqual(BUILT_IN_TEMPLATES.map((t) => t.id), ["blank", "announcement", "newsletter", "promo", "event", "product"]);
+  for (const t of BUILT_IN_TEMPLATES) {
+    const d = designFromStarter(t.id)!;
+    assert.equal(d.tpl, t.id === "blank" ? "custom" : t.id);
+    if (t.id !== "blank") {
+      assert.equal(t.name, TEMPLATE_NAMES[t.id as TemplateKey], "named as in the editor");
+      assert.ok(t.subject && t.previewText);
+      assert.ok(renderCampaignHtml(d, { logo: EMPTY_LOGO, tz: "UTC" }).includes(d.C.headline));
+    }
+  }
 });

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { TemplateEditor } from "@/components/dashboard/template-editor";
 import { getContactFieldKeys, getDepartments, getTemplate } from "@/lib/queries";
@@ -17,6 +17,8 @@ export default async function EditTemplatePage({ params }: { params: { id: strin
   const access = ctx.access!;
   const template = await getTemplate(ctx, params.id);
   if (!template) notFound();
+  // Saved from the campaign editor: its layout is changed there (use the template, edit, save as a template).
+  if (template.design) redirect("/app/templates");
   const [contactFieldKeys, allDepartments] = await Promise.all([getContactFieldKeys(ctx), getDepartments(ctx)]);
 
   return (
