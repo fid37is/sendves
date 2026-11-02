@@ -112,9 +112,9 @@ export default async function MemberDetailsPage({ params }: { params: { userId: 
               return (
                 <tr key={r.id}>
                   <TD className="font-semibold text-ink">{r.fromName}</TD>
-                  <TD><span className="break-all">{r.email}</span></TD>
-                  <TD><Badge tone={isPrimary ? "brand" : "neutral"}>{isPrimary ? "Work email" : "Alias"}</Badge></TD>
-                  <TD>
+                  <TD label="Address" wide><span className="break-all">{r.email}</span></TD>
+                  <TD label="Type"><Badge tone={isPrimary ? "brand" : "neutral"}>{isPrimary ? "Work email" : "Alias"}</Badge></TD>
+                  <TD label="Status">
                     <div className="flex flex-wrap gap-1.5">
                       <Badge tone={r.status === "active" ? "success" : "neutral"}>{r.status === "active" ? "Active" : "Deactivated"}</Badge>
                       {!r.domainReady ? <Badge tone="warning">Domain not verified</Badge> : null}

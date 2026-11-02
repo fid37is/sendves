@@ -48,12 +48,12 @@ export default async function CampaignsPage() {
                   <Link href={`/app/campaigns/${c.id}`} className="hover:text-brand-800 hover:underline" title={c.status === "draft" ? "Continue editing" : "Open the email and its results"}>{c.name}</Link>
                   <span className="block text-xs font-normal text-ink-muted">{c.subject}</span>
                 </TD>
-                <TD><StatusBadge status={c.status} /></TD>
-                <TD>{c.audience}</TD>
-                <TD>{c.status === "draft" ? "-" : formatNumber(c.sent)}</TD>
-                <TD>{c.status === "draft" || !c.sent ? "-" : `${((c.delivered / c.sent) * 100).toFixed(1)}%`}</TD>
-                <TD>{c.clickRate}</TD>
-                <TD>{c.date}</TD>
+                <TD label="Status"><StatusBadge status={c.status} /></TD>
+                <TD label="Audience">{c.audience}</TD>
+                <TD label="Sent">{c.status === "draft" ? "-" : formatNumber(c.sent)}</TD>
+                <TD label="Delivered">{c.status === "draft" || !c.sent ? "-" : `${((c.delivered / c.sent) * 100).toFixed(1)}%`}</TD>
+                <TD label="Click rate">{c.clickRate}</TD>
+                <TD label="Date">{c.date}</TD>
                 <TD className="text-right">
                   {/* Only drafts and cancelled campaigns can be deleted; anything that has sent keeps its results. */}
                   {manage && (c.status === "draft" || c.status === "cancelled") ? (

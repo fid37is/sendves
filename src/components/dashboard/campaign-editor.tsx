@@ -594,10 +594,9 @@ export function CampaignEditor(props: Props) {
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex flex-nowrap items-center gap-2 px-4 pb-1 pt-3">
+              <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-1 pt-3 sm:px-4">
                 <Button size="sm" variant="outline" disabled={historyLength === 0} onClick={undo}>Undo</Button>
                 <Button size="sm" variant="outline" onClick={() => openPanel(custom ? "blocks" : "tpl")}>{custom ? "Add content" : "Change template"}</Button>
-                <span className="min-w-0 flex-1" />
                 <Button size="sm" variant="outline" loading={testing} onClick={sendTest}>Send test</Button>
               </div>
               <div className="mx-auto mb-2 mt-1 rounded-full border border-mist bg-white px-3 py-0.5 text-xs text-ink-muted">
@@ -619,8 +618,8 @@ export function CampaignEditor(props: Props) {
               pickPreset={pickPreset}
             />
           </div>
-          <div className="flex items-center justify-end gap-2 border-t border-mist bg-white px-4 py-2.5">
-            {!props.canSend ? <span className="mr-auto text-xs text-ink-muted">You can prepare this campaign, but sending is limited to people with permission to send. Ask a manager or administrator to send it.</span> : null}
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-mist bg-white px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:px-4">
+            {!props.canSend ? <span className="mr-auto min-w-0 flex-1 text-xs text-ink-muted">You can prepare this campaign, but sending is limited to people with permission to send. Ask a manager or administrator to send it.</span> : null}
             <Button size="sm" variant="outline" onClick={() => setStep("preview")}>Preview</Button>
             {props.canSend ? (
               <div ref={menuRef} className="relative flex">

@@ -55,7 +55,7 @@ export default async function DomainPage({ params }: { params: { id: string } })
         title={d.domain}
         description={[d.ready ? "Ready to send" : "Not ready to send yet", checked ? `Last checked ${checked}` : "Not checked yet"].join(" · ")}
         action={manage ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <form action={checkDomainAction}>
               <input type="hidden" name="id" value={d.id} />
               <ActionButton variant="outline">Check records</ActionButton>
@@ -95,20 +95,20 @@ export default async function DomainPage({ params }: { params: { id: string } })
             {d.records.map((r) => (
               <tr key={r.host + r.purpose}>
                 <TD className="font-semibold text-ink">{r.purpose}</TD>
-                <TD>{r.type}</TD>
-                <TD>
+                <TD label="Type">{r.type}</TD>
+                <TD label="Host" wide>
                   <div className="flex items-start gap-1">
                     <span className="min-w-0 break-all font-mono text-xs">{r.host}</span>
                     <CopyText value={r.host} label="host" />
                   </div>
                 </TD>
-                <TD>
+                <TD label="Value" wide>
                   <div className="flex items-start gap-1">
                     <span className="min-w-0 break-all font-mono text-xs">{r.value}</span>
                     <CopyText value={r.value} label="value" />
                   </div>
                 </TD>
-                <TD><StatusBadge status={r.status} /></TD>
+                <TD label="Status"><StatusBadge status={r.status} /></TD>
               </tr>
             ))}
           </tbody>

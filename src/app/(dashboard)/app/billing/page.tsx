@@ -50,12 +50,12 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader title="Current plan" description={`You’re on the ${workspace.plan} plan.`} />
-          <div className="space-y-5 p-6">
+          <div className="space-y-5 p-4 sm:p-6">
             <Meter label="Contacts" used={workspace.contactsUsed} limit={workspace.contactsLimit} />
             <Meter label="Emails this month" used={workspace.sendsUsed} limit={workspace.sendsLimit} />
           </div>
           {canUpgrade ? (
-            <div className="border-t border-mist p-6">
+            <div className="border-t border-mist p-4 sm:p-6">
               {providers.length === 0 ? (
                 <p className="mb-4 text-sm text-ink-muted">Online payment isn’t switched on yet. Send us a request and we’ll move your plan for you.</p>
               ) : null}
@@ -69,9 +69,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
           <CardHeader title="Available plans" />
           <ul className="divide-y divide-mist">
             {plans.map((p) => (
-              <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 text-sm">
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 text-sm sm:px-6">
                 <div><p className="font-semibold text-ink">{p.name}</p><p className="text-ink-muted">{p.contacts}</p></div>
-                <div className="flex items-center gap-3">
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
                   <p className="font-bold text-ink">{p.price} <span className="font-normal text-ink-muted">{p.price === "Custom" ? "" : "/ mo"}</span></p>
                   {p.id === current ? <span className="text-xs font-semibold text-success">Current</span> : null}
                   {ORDER.indexOf(p.id) > currentRank && p.id !== "scale" ? (

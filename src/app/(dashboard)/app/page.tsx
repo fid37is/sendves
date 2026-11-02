@@ -54,7 +54,7 @@ export default async function OverviewPage(_props: { searchParams: SearchParams 
       <div className="mt-8 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <Card>
           <CardHeader title="Clicks over time" description="Last 30 days. Unique clickers count each recipient once." action={<Link href="/app/reports" className="text-sm font-semibold text-brand-800 hover:underline">Full report</Link>} />
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <TrendChart
               ariaLabel="Clicks and unique clickers per day over the last 30 days"
               dates={o.series.map((d) => d.date)}
@@ -83,10 +83,10 @@ export default async function OverviewPage(_props: { searchParams: SearchParams 
               {o.recent.map((c) => (
                 <tr key={c.id}>
                   <TD className="font-semibold text-ink"><Link href={`/app/campaigns/${c.id}`} className="hover:text-brand-800 hover:underline">{c.name}</Link></TD>
-                  <TD><StatusBadge status={c.status} /></TD>
-                  <TD>{formatNumber(c.sent)}</TD>
-                  <TD>{formatNumber(c.clicks)}</TD>
-                  <TD className="font-semibold text-ink">{c.clickRate}</TD>
+                  <TD label="Status"><StatusBadge status={c.status} /></TD>
+                  <TD label="Sent">{formatNumber(c.sent)}</TD>
+                  <TD label="Clicks">{formatNumber(c.clicks)}</TD>
+                  <TD label="Click rate" className="font-semibold text-ink">{c.clickRate}</TD>
                 </tr>
               ))}
               {o.recent.length === 0 ? <EmptyRow cols={5} message="No campaigns yet. Create your first one to see it here." /> : null}
@@ -101,7 +101,7 @@ export default async function OverviewPage(_props: { searchParams: SearchParams 
               const done = o.checklist[i];
               return (
                 <li key={item.label}>
-                  <Link href={item.href} className="flex items-center gap-3 px-6 py-3.5 text-sm hover:bg-mist-50">
+                  <Link href={item.href} className="flex items-center gap-3 px-4 py-3.5 text-sm hover:bg-mist-50 sm:px-6">
                     {done ? <CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" /> : <Circle className="h-5 w-5 text-lavender-300" aria-hidden="true" />}
                     <span className={done ? "text-ink-muted line-through" : "font-semibold text-ink"}>{item.label}</span>
                   </Link>

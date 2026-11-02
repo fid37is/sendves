@@ -196,3 +196,59 @@
   /* Purely decorative loops are removed rather than frozen. */
   .animate-drift { display: none; }
 }
+
+/* ── Tables that turn into cards when they are narrow ────────────────────────────────────────────
+   The wrapper is a size container, so this reacts to the width the table actually has (a phone, or a
+   narrow column beside a sidebar on a tablet), not to the width of the screen. Browsers without
+   container queries keep the scrolling table. See components/ui/table.tsx for how cells are marked up. */
+.table-wrap { container: tbl / inline-size; }
+.table-stack { min-width: 640px; }
+.table-stack .tlabel { display: none; }
+
+@container tbl (max-width: 639.98px) {
+  .table-stack { min-width: 0; }
+  .table-stack, .table-stack tbody { display: block; width: 100%; }
+
+  /* The header row stays in the page for screen readers but is not drawn. */
+  .table-stack thead:not(.tkeep) {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* One row = one card: the title across the top, then the labelled cells two to a line. */
+  .table-stack tbody tr {
+    position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.625rem 1rem; padding: 1rem; border-bottom: 1px solid rgb(var(--c-mist));
+  }
+  .table-stack tbody tr:last-child { border-bottom: 0; }
+  .table-stack tbody td {
+    display: block; width: auto; min-width: 0; max-width: none; padding: 0; border: 0; white-space: normal;
+  }
+  .table-stack tbody td:not([data-label]), .table-stack tbody td[data-wide] { grid-column: 1 / -1; }
+  .table-stack tbody td:empty { display: none; }
+  /* Short fields sit together; long ones (wide) follow; the action cell is always last. */
+  .table-stack tbody td[data-wide] { order: 1; }
+  .table-stack tbody td:last-child:not(:first-child):not([data-label]) { order: 2; }
+  .table-stack tbody td.tempty { padding: 2.5rem 1rem; }
+
+  .table-stack .tlabel {
+    display: block; margin-bottom: 0.125rem; font-size: 0.6875rem; font-weight: 600; line-height: 1.2;
+    letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--c-ink-muted));
+  }
+
+  /* A header that stays: the contacts table keeps "select all" and the bulk actions on a phone. */
+  .table-stack thead.tkeep { display: block; border-bottom: 1px solid rgb(var(--c-mist)); background: rgb(var(--c-mist-50)); }
+  .table-stack thead.tkeep tr { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; height: auto; padding: 0.625rem 1rem; }
+  .table-stack thead.tkeep th { display: block; width: auto; padding: 0; border: 0; background: transparent; }
+  .table-stack thead.tkeep th.tcol { display: none; }
+  .table-stack thead.tkeep th.tgrow { flex: 1 1 0%; min-width: 0; }
+  .table-stack thead.tkeep tr.tsel { background: rgb(var(--c-brand-50)); }
+
+  /* A checkbox cell sits at the card's corner and the title makes room for it. */
+  .table-stack tbody td.tselect { position: absolute; top: 1rem; left: 1rem; grid-column: auto; width: auto; }
+  .table-stack tbody td.tselect + td { padding-left: 1.75rem; }
+}
+.tstack-only { display: none; }
+@container tbl (max-width: 639.98px) {
+  .tstack-only { display: inline; }
+}

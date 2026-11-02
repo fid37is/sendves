@@ -34,9 +34,8 @@ const Subject = ({ v, preheader, className }: { v: PreviewVariant; preheader: st
 export function PreviewStep(p: Props) {
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 border-b border-mist bg-white px-3 py-2.5 sm:px-5">
+      <div className="flex flex-wrap items-center justify-end gap-2 border-b border-mist bg-white px-3 py-2.5 sm:px-5">
         <Button size="sm" variant="outline" onClick={p.onBack}>Back to editor</Button>
-        <span className="flex-1" />
         <Button size="sm" variant="outline" onClick={p.onCompare}>{p.comparing ? "Single view" : "Compare contacts"}</Button>
         <Seg label="Preview size" value={p.device} onChange={p.onDevice} options={[{ value: "desk", label: "Desktop" }, { value: "mob", label: "Mobile" }]} />
         <Button size="sm" variant="outline" onClick={p.onDark}>Theme: {p.dark ? "Light" : "Dark"}</Button>
@@ -45,11 +44,11 @@ export function PreviewStep(p: Props) {
         </SelectBox>
       </div>
 
-      <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto p-5">
+      <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto p-3 sm:p-5">
         {p.comparing ? (
           <div className="flex flex-wrap items-start justify-center gap-4">
             {p.compare.map((v) => (
-              <div key={v.id} className="w-[300px]">
+              <div key={v.id} className="w-[300px] max-w-full">
                 <div className="mb-1.5 text-[13px] text-ink-muted">{v.label}</div>
                 <MailFrame doc={v.doc} title={`Email preview: ${v.label}`} />
               </div>

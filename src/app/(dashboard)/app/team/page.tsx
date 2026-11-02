@@ -100,7 +100,7 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
                         </div>
                       </div>
                     </TD>
-                    <TD>
+                    <TD label="Work email" wide>
                       {m.workEmail ? (
                         <>
                           <p className="break-all text-ink">{m.workEmail}</p>
@@ -110,8 +110,8 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
                         <span className="text-ink-muted">Not set</span>
                       )}
                     </TD>
-                    <TD><Badge tone={m.role === "owner" ? "brand" : "neutral"}>{ROLE_LABEL[m.role]}</Badge></TD>
-                    <TD><Badge tone={m.status === "active" ? "success" : "warning"}>{m.status === "active" ? "Active" : "Deactivated"}</Badge></TD>
+                    <TD label="Role"><Badge tone={m.role === "owner" ? "brand" : "neutral"}>{ROLE_LABEL[m.role]}</Badge></TD>
+                    <TD label="Status"><Badge tone={m.status === "active" ? "success" : "warning"}>{m.status === "active" ? "Active" : "Deactivated"}</Badge></TD>
                     <TD className="text-right">
                       <Link href={`/app/team/${m.userId}`} aria-label={`Open ${name}`} className="inline-flex rounded-full p-2 text-ink-muted transition-colors hover:bg-mist-100 hover:text-ink">
                         <ChevronRight className="h-4 w-4" aria-hidden="true" />
@@ -132,9 +132,9 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
                       </div>
                     </div>
                   </TD>
-                  <TD><p className="break-all text-ink">{i.email}</p></TD>
-                  <TD><Badge tone="neutral">{ROLE_LABEL[i.role]}</Badge></TD>
-                  <TD><Badge tone={i.expired ? "danger" : "warning"}>{i.expired ? "Invite expired" : "Invited"}</Badge></TD>
+                  <TD label="Work email" wide><p className="break-all text-ink">{i.email}</p></TD>
+                  <TD label="Role"><Badge tone="neutral">{ROLE_LABEL[i.role]}</Badge></TD>
+                  <TD label="Status"><Badge tone={i.expired ? "danger" : "warning"}>{i.expired ? "Invite expired" : "Invited"}</Badge></TD>
                   <TD>
                     {myRoles.includes(i.role) ? (
                       <div className="flex items-center justify-end gap-1.5">
@@ -174,8 +174,8 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
                     <p className="font-semibold text-ink">{d.name}</p>
                     {d.description ? <p className="text-xs text-ink-muted">{d.description}</p> : null}
                   </TD>
-                  <TD>{d.members}</TD>
-                  <TD>{d.resources}</TD>
+                  <TD label="Members">{d.members}</TD>
+                  <TD label="Campaigns, lists & templates" wide>{d.resources}</TD>
                   <TD>
                     {manageDepartments ? (
                       <div className="flex items-center justify-end gap-1">
@@ -212,12 +212,12 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
           />
           <form id="roles-form" action={saveRolePermissionsAction}>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
+              <table className="w-full min-w-[20rem] text-left text-sm">
                 <thead>
                   <tr>
-                    <th className="border-b border-mist bg-mist-50 px-6 py-3 text-xs font-semibold text-ink-muted">Permission</th>
+                    <th className="sticky left-0 z-[1] border-b border-mist bg-mist-50 px-3 py-3 text-xs font-semibold text-ink-muted sm:px-6">Permission</th>
                     {ROLES.map((r) => (
-                      <th key={r} className="border-b border-mist bg-mist-50 px-4 py-3 text-center text-xs font-semibold text-ink-muted">{ROLE_LABEL[r]}</th>
+                      <th key={r} className="border-b border-mist bg-mist-50 px-1 py-3 text-center text-[10px] font-semibold text-ink-muted sm:px-4 sm:text-xs">{ROLE_LABEL[r]}</th>
                     ))}
                   </tr>
                 </thead>
@@ -226,15 +226,15 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
                     const newGroup = i === 0 || PERMISSION_LIST[i - 1].group !== p.group;
                     return (
                       <Fragment key={p.key}>
-                        {newGroup ? <tr><td colSpan={ROLES.length + 1} className="bg-mist-50/60 px-6 py-2 text-xs font-bold uppercase tracking-wide text-ink-muted">{p.group}</td></tr> : null}
+                        {newGroup ? <tr><td colSpan={ROLES.length + 1} className="bg-mist-50/60 px-3 py-2 text-xs font-bold uppercase tracking-wide text-ink-muted sm:px-6">{p.group}</td></tr> : null}
                         <tr>
-                          <td className="border-b border-mist px-6 py-3 text-ink-soft">{p.label}</td>
+                          <td className="sticky left-0 z-[1] border-b border-mist bg-white px-3 py-3 text-ink-soft sm:px-6">{p.label}</td>
                           {ROLES.map((r) => {
                             const isOwner = r === "owner";
                             const locked = isOwner || !manageRoles || OWNER_ONLY.includes(p.key);
                             const checked = r === "owner" || rolePerms[r as (typeof CAMPAIGN_ROLES)[number]].includes(p.key);
                             return (
-                              <td key={r} className="border-b border-mist px-4 py-3 text-center">
+                              <td key={r} className="border-b border-mist px-1 py-3 text-center sm:px-4">
                                 <input
                                   type="checkbox"
                                   name={isOwner ? undefined : `perm:${r}:${p.key}`}
