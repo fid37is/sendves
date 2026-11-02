@@ -261,8 +261,8 @@ export function AppShell({
         </div>
       ) : null}
 
-      <main className={cn("transition-[padding] duration-300 ease-out", collapsed ? "lg:pl-[76px]" : "lg:pl-64")}>
-        <div key={pathname} className="animate-rise-fast mx-auto max-w-7xl px-4 py-8 sm:px-8 sm:py-10">
+      <main className={cn("min-w-0 overflow-x-clip transition-[padding] duration-300 ease-out", collapsed ? "lg:pl-[76px]" : "lg:pl-64")}>
+        <div key={pathname} className="animate-rise-fast mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-10">
           <BackContext.Provider value={back}>{children}</BackContext.Provider>
         </div>
       </main>

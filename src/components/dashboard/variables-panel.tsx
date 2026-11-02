@@ -157,11 +157,11 @@ export function VariablesEditor({ variables, setVariables, contactFieldKeys, tit
 
         <section aria-labelledby="vars-campaign">
           <div className="flex items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <h3 id="vars-campaign" className="text-sm font-bold text-ink">Campaign variables</h3>
               <p className="mt-1 text-xs text-ink-muted">Values you set once, the same in every email: a promo code, an event date, a link label.</p>
             </div>
-            <Button type="button" size="sm" variant="secondary" onClick={addCampaign}><Plus className="h-4 w-4" aria-hidden="true" />Add variable</Button>
+            <Button type="button" size="sm" variant="secondary" className="shrink-0" onClick={addCampaign}><Plus className="h-4 w-4" aria-hidden="true" />Add variable</Button>
           </div>
           {campaignVars.length === 0 ? <p className="mt-3 rounded-xl bg-mist-50 p-4 text-sm text-ink-muted">None yet. Add one, then insert it with “Insert variable”.</p> : (
             <ul className="mt-3 space-y-3">

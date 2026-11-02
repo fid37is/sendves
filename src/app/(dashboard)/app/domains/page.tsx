@@ -43,15 +43,15 @@ export default async function DomainsPage(_props: { searchParams: SearchParams }
             ) : domains.map((d) => (
               <tr key={d.id} className="transition-colors hover:bg-mist-50/60">
                 <TD><Link href={`/app/domains/${d.id}`} className="font-semibold text-ink hover:underline">{d.domain}</Link></TD>
-                <TD><StatusBadge status={d.ready ? "verified" : d.status === "verified" ? "pending" : d.status} /></TD>
-                <TD>
+                <TD label="Status"><StatusBadge status={d.ready ? "verified" : d.status === "verified" ? "pending" : d.status} /></TD>
+                <TD label="Checks" wide>
                   <div className="flex flex-wrap gap-1.5">
                     <Badge tone={d.dkimOk ? "success" : "warning"}>DKIM</Badge>
                     <Badge tone={d.spfOk ? "success" : "warning"}>SPF</Badge>
                     <Badge tone={d.dmarcOk ? "success" : "warning"}>DMARC</Badge>
                   </div>
                 </TD>
-                <TD>{fmtChecked(d.lastChecked) ?? <span className="text-ink-muted">Not yet</span>}</TD>
+                <TD label="Last checked">{fmtChecked(d.lastChecked) ?? <span className="text-ink-muted">Not yet</span>}</TD>
                 <TD className="text-right">
                   <Link href={`/app/domains/${d.id}`} aria-label={`Open ${d.domain}`} className="inline-flex rounded-full p-2 text-ink-muted transition-colors hover:bg-mist-100 hover:text-ink">
                     <ChevronRight className="h-4 w-4" aria-hidden="true" />

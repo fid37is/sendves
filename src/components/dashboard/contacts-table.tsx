@@ -176,36 +176,41 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
   return (
     <>
       <Table>
-        <thead>
+        {/* `tkeep`: when the table is stacked into cards on a phone this header stays, so "select all" and the actions remain reachable. */}
+        <thead className="tkeep">
           {/* A fixed-height row: choosing contacts swaps the column titles for the actions in place, so nothing moves. */}
-          <tr className="h-12">
+          <tr className={cn("h-12", hasSelection && "tsel")}>
             <TH className={cn("w-10", hasSelection && "bg-brand-50")}>
-              <input
-                type="checkbox"
-                aria-label="Select all contacts on this page"
-                checked={allSelected}
-                disabled={rows.length === 0}
-                ref={(el) => { if (el) el.indeterminate = someSelected; }}
-                onChange={toggleAll}
-                className="h-4 w-4 accent-brand-700"
-              />
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label="Select all contacts on this page"
+                  checked={allSelected}
+                  disabled={rows.length === 0}
+                  ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                  onChange={toggleAll}
+                  className="h-4 w-4 accent-brand-700"
+                />
+                {hasSelection ? null : <span className="tstack-only text-sm font-semibold text-ink-soft">Select all</span>}
+              </label>
             </TH>
             {hasSelection ? (
-              <TH colSpan={4} className="bg-brand-50 py-0">
-                <div role="region" aria-label="Actions for selected contacts" className="flex items-center gap-3">
-                  <p className="text-sm font-semibold text-brand-800" aria-live="polite">{selected.size} selected</p>
-                  <div className="flex gap-2">
+              <TH colSpan={4} className="tgrow bg-brand-50 py-0">
+                {/* The count on the left, the actions on the right (on a phone they wrap onto their own right-aligned line). */}
+                <div role="region" aria-label="Actions for selected contacts" className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1 sm:py-0">
+                  <p className="order-1 mr-auto text-sm font-semibold text-brand-800" aria-live="polite">{selected.size} selected</p>
+                  <div className="order-3 flex basis-full flex-wrap justify-end gap-2 sm:order-2 sm:basis-auto">
                     <Button size="sm" variant="outline" onClick={() => setPicker("add")} disabled={busy}>Add to list</Button>
                     {current ? <Button size="sm" variant="outline" onClick={() => setPicker("move")} disabled={busy}>Move to another list</Button> : null}
                     {current ? <Button size="sm" variant="outline" onClick={removeFromCurrent} disabled={busy}>Remove from this list</Button> : null}
                     <Button size="sm" variant="danger" onClick={deleteSelected} disabled={busy}>Delete</Button>
                   </div>
-                  <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-sm font-semibold text-brand-800 hover:underline">Clear</button>
+                  <button type="button" onClick={() => setSelected(new Set())} className="order-2 text-sm font-semibold text-brand-800 hover:underline sm:order-3">Clear</button>
                 </div>
               </TH>
             ) : (
               <>
-                <TH>Contact</TH><TH>Status</TH><TH>Lists</TH><TH>Added</TH>
+                <TH className="tcol">Contact</TH><TH className="tcol">Status</TH><TH className="tcol">Lists</TH><TH className="tcol">Added</TH>
               </>
             )}
           </tr>
@@ -213,7 +218,7 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
         <tbody>
           {rows.map((c) => (
             <tr key={c.id} className={selected.has(c.id) ? "bg-brand-50/50" : undefined}>
-              <TD className="w-10">
+              <TD className="tselect w-10">
                 <input
                   type="checkbox"
                   aria-label={`Select ${c.email}`}
@@ -222,9 +227,9 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
                   className="h-4 w-4 accent-brand-700"
                 />
               </TD>
-              <TD><p className="font-semibold text-ink">{c.name}</p><p className="text-xs text-ink-muted">{c.email}</p></TD>
-              <TD><StatusBadge status={c.status} /></TD>
-              <TD>
+              <TD><p className="font-semibold text-ink">{c.name}</p><p className="break-all text-xs text-ink-muted">{c.email}</p></TD>
+              <TD label="Status"><StatusBadge status={c.status} /></TD>
+              <TD label="Lists" wide>
                 {c.lists.length === 0 ? "-" : (
                   // One line per row, however many lists: the first two, then "+N" with the rest in a tooltip.
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
@@ -241,7 +246,7 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
                   </span>
                 )}
               </TD>
-              <TD>{c.added}</TD>
+              <TD label="Added">{c.added}</TD>
             </tr>
           ))}
           {rows.length === 0 ? <EmptyRow cols={5} message={emptyMessage} /> : null}

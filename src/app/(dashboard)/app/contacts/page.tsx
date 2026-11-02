@@ -61,7 +61,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
         title="Contacts"
         description={description}
         action={
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap justify-end gap-3">
             <ExportContactsButton lists={lists.map(({ id, name, count }) => ({ id, name, count }))} total={totalContacts} defaultListId={current?.id} />
             {manage ? (
               <>
@@ -81,12 +81,12 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
             <div className="flex flex-wrap items-center gap-3 border-b border-mist p-4">
             <form className="flex min-w-0 flex-1 flex-wrap items-center gap-3" action="/app/contacts">
               {listParam ? <input type="hidden" name="list" value={listParam} /> : null}
-              <Input name="q" defaultValue={searchParams.q} type="search" placeholder="Search by name or email" aria-label="Search contacts" className="max-w-xs" />
-              <Select name="status" defaultValue={searchParams.status ?? ""} aria-label="Filter by status" className="max-w-[180px]">
+              <Input name="q" defaultValue={searchParams.q} type="search" placeholder="Search by name or email" aria-label="Search contacts" className="basis-full sm:max-w-xs sm:basis-60" />
+              <Select name="status" defaultValue={searchParams.status ?? ""} aria-label="Filter by status" className="min-w-0 flex-1 sm:max-w-[180px] sm:flex-none">
                 <option value="">All statuses</option>
                 {["subscribed", "unsubscribed", "bounced", "complained", "cleaned"].map((s) => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
               </Select>
-              <Button type="submit" variant="outline">Filter</Button>
+              <Button type="submit" variant="outline" className="ml-auto">Filter</Button>
             </form>
             {current ? <ListSettingsButton list={current} signupUrl={`${siteConfig.url}/subscribe/${current.id}`} className="ml-auto" /> : null}
             </div>
@@ -94,9 +94,9 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
             <ContactsTable rows={rows} lists={lists} current={current ? { id: current.id, name: current.name } : null} emptyMessage={emptyMessage} />
 
             {pages > 1 ? (
-              <div className="flex items-center justify-between border-t border-mist px-6 py-3 text-sm text-ink-muted">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-mist px-4 py-3 text-sm text-ink-muted sm:px-6">
                 <span>Page {page} of {pages} ({total.toLocaleString("en-US")} contacts)</span>
-                <span className="flex gap-4">
+                <span className="ml-auto flex gap-4">
                   {page > 1 ? <Link className="font-semibold text-brand-800 hover:underline" href={qs(page - 1)}>Previous</Link> : null}
                   {page < pages ? <Link className="font-semibold text-brand-800 hover:underline" href={qs(page + 1)}>Next</Link> : null}
                 </span>

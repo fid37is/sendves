@@ -31,7 +31,7 @@ export function BlockEditor({ blocks, setBlocks, variableOptions }: { blocks: Bl
   return (
     <Card>
       <CardHeader title="Content" description="Build your email from blocks. Use Insert variable to personalise headings, text and button labels." />
-      <div className="space-y-4 p-6">
+      <div className="space-y-4 p-4 sm:p-6">
         {blocks.length === 0 ? <p className="rounded-xl bg-mist-50 p-4 text-sm text-ink-muted">No blocks yet. Add one below.</p> : null}
         {blocks.map((b, i) => (
           <div key={b.id} className="rounded-2xl border border-mist p-4">
@@ -65,7 +65,7 @@ export function BlockEditor({ blocks, setBlocks, variableOptions }: { blocks: Bl
             {b.type === "divider" ? <p className="text-sm text-ink-muted">A thin horizontal line.</p> : null}
           </div>
         ))}
-        <div className="flex flex-wrap gap-2 pt-1">
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
           {(["heading", "text", "image", "button", "divider", "spacer"] as const).map((t) => (
             <Button key={t} type="button" variant="secondary" size="sm" onClick={() => setBlocks((bs) => [...bs, blank(t)])}>+ {LABELS[t]}</Button>
           ))}

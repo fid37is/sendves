@@ -98,7 +98,7 @@ export default async function CampaignPage({ params }: { params: { id: string };
         title={c.name}
         description={c.subject}
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <StatusBadge status={c.status} />
             {canPause ? <form action={pauseCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" variant="outline" size="sm">Pause</Button></form> : null}
             {canResume ? <form action={resumeCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" size="sm">Resume</Button></form> : null}
@@ -153,7 +153,7 @@ export default async function CampaignPage({ params }: { params: { id: string };
       <div className="mt-8 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <Card>
           <CardHeader title="Clicks over time" description="Since this campaign started sending" />
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <TrendChart
               ariaLabel="Clicks and unique clickers per day for this campaign"
               dates={series.map((d) => d.date)}
@@ -183,10 +183,10 @@ export default async function CampaignPage({ params }: { params: { id: string };
           <tbody>
             {links.map((l) => (
               <tr key={l.url}>
-                <TD className="max-w-[360px] break-all">{l.url}</TD>
-                <TD className="w-48"><div className="h-2 rounded-full bg-accent-100"><div className="h-2 rounded-full bg-brand-700" style={{ width: `${(l.clicks / maxLinkClicks) * 100}%` }} /></div></TD>
-                <TD className="font-semibold text-ink">{formatNumber(l.clicks)}</TD>
-                <TD>{formatNumber(l.uniqueClicks)}</TD>
+                <TD className="break-all">{l.url}</TD>
+                <TD label="Share of clicks" wide><div className="h-2 rounded-full bg-accent-100"><div className="h-2 rounded-full bg-brand-700" style={{ width: `${(l.clicks / maxLinkClicks) * 100}%` }} /></div></TD>
+                <TD label="Clicks" className="font-semibold text-ink">{formatNumber(l.clicks)}</TD>
+                <TD label="Unique">{formatNumber(l.uniqueClicks)}</TD>
               </tr>
             ))}
             {links.length === 0 ? <EmptyRow cols={4} message="No clicks recorded yet." /> : null}

@@ -68,7 +68,7 @@ export function CampaignPerformance({
     <>
       {c.status === "sending" || c.status === "scheduled" || delivery.queued > 0 ? (
         <Card className="mb-6 p-5">
-          <div className="flex items-baseline justify-between text-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
             <span className="font-semibold text-ink">{c.status === "scheduled" ? "Waiting to send" : "Sending progress"}</span>
             <span className="text-ink-muted">{formatNumber(attempted)} of {formatNumber(delivery.total || recipients)} processed{delivery.queued ? ` · ${formatNumber(delivery.queued)} waiting` : ""}</span>
           </div>
@@ -93,7 +93,7 @@ export function CampaignPerformance({
           <Table>
             <thead><tr><TH>Reason</TH><TH className="w-28">Emails</TH></tr></thead>
             <tbody>
-              {delivery.failures.map((f) => (<tr key={f.reason}><TD className="break-words">{f.reason}</TD><TD className="font-semibold text-ink">{formatNumber(f.count)}</TD></tr>))}
+              {delivery.failures.map((f) => (<tr key={f.reason}><TD className="break-words">{f.reason}</TD><TD label="Emails" className="font-semibold text-ink">{formatNumber(f.count)}</TD></tr>))}
               {delivery.failures.length === 0 ? <EmptyRow cols={2} message="The provider didn’t report a reason. Open the Recipients tab and filter by Failed or Bounced." /> : null}
             </tbody>
           </Table>
@@ -103,7 +103,7 @@ export function CampaignPerformance({
       <div className="mt-8 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <Card>
           <CardHeader title="Engagement over time" description="Since this campaign started sending" />
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <TrendChart
               ariaLabel="Opens, clicks and unique clickers per day for this campaign"
               dates={series.map((d) => d.date)}
@@ -136,10 +136,10 @@ export function CampaignPerformance({
           <tbody>
             {links.map((l) => (
               <tr key={l.url}>
-                <TD className="max-w-[360px] break-all">{l.url}</TD>
-                <TD className="w-48"><div className="h-2 rounded-full bg-accent-100"><div className="h-2 rounded-full bg-brand-700" style={{ width: `${(l.clicks / maxLinkClicks) * 100}%` }} /></div></TD>
-                <TD className="font-semibold text-ink">{formatNumber(l.clicks)}</TD>
-                <TD>{formatNumber(l.uniqueClicks)}</TD>
+                <TD className="break-all">{l.url}</TD>
+                <TD label="Share of clicks" wide><div className="h-2 rounded-full bg-accent-100"><div className="h-2 rounded-full bg-brand-700" style={{ width: `${(l.clicks / maxLinkClicks) * 100}%` }} /></div></TD>
+                <TD label="Clicks" className="font-semibold text-ink">{formatNumber(l.clicks)}</TD>
+                <TD label="Unique">{formatNumber(l.uniqueClicks)}</TD>
               </tr>
             ))}
             {links.length === 0 ? <EmptyRow cols={4} message="No clicks recorded yet." /> : null}
@@ -172,10 +172,10 @@ export function CampaignRecipients({
             {FILTER_LABEL[f]}
           </Link>
         ))}
-        <form action={base} className="ml-auto flex items-center gap-2">
+        <form action={base} className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
           <input type="hidden" name="tab" value="recipients" />
           {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
-          <Input name="q" defaultValue={q} type="search" placeholder="Search by email" aria-label="Search recipients" className="w-56" />
+          <Input name="q" defaultValue={q} type="search" placeholder="Search by email" aria-label="Search recipients" className="min-w-0 flex-1 sm:w-56 sm:flex-none" />
           <Button type="submit" variant="outline" size="sm" aria-label="Search"><Search className="h-4 w-4" aria-hidden="true" /></Button>
         </form>
       </div>
@@ -185,19 +185,19 @@ export function CampaignRecipients({
           {rows.map((r) => (
             <tr key={r.id}>
               <TD className="font-semibold text-ink">{r.email}</TD>
-              <TD><div className="flex flex-wrap gap-1"><Badge tone={sendTone(r.status)}>{r.status === "queued" || r.status === "sending" ? "Waiting" : r.status.charAt(0).toUpperCase() + r.status.slice(1)}</Badge>{r.unsubscribed ? <Badge>Unsubscribed</Badge> : null}</div></TD>
-              <TD>{r.opened ? <Badge tone="brand">Opened</Badge> : <span className="text-ink-muted">-</span>}</TD>
-              <TD>{r.clicked ? <span className="font-semibold text-ink">{r.clicked}</span> : <span className="text-ink-muted">-</span>}</TD>
-              <TD className="whitespace-nowrap">{when(r.sentAt, tz)}</TD>
-              <TD className="max-w-[320px] break-words text-xs text-ink-muted">{r.error || ""}</TD>
+              <TD label="Status"><div className="flex flex-wrap gap-1"><Badge tone={sendTone(r.status)}>{r.status === "queued" || r.status === "sending" ? "Waiting" : r.status.charAt(0).toUpperCase() + r.status.slice(1)}</Badge>{r.unsubscribed ? <Badge>Unsubscribed</Badge> : null}</div></TD>
+              <TD label="Opened">{r.opened ? <Badge tone="brand">Opened</Badge> : <span className="text-ink-muted">-</span>}</TD>
+              <TD label="Clicks">{r.clicked ? <span className="font-semibold text-ink">{r.clicked}</span> : <span className="text-ink-muted">-</span>}</TD>
+              <TD label="Sent" className="whitespace-nowrap">{when(r.sentAt, tz)}</TD>
+              <TD label="Detail" wide className="max-w-[320px] break-words text-xs text-ink-muted">{r.error || ""}</TD>
             </tr>
           ))}
           {rows.length === 0 ? <EmptyRow cols={6} message={q || filter !== "all" ? "No recipients match." : "Nobody has been sent this campaign yet."} /> : null}
         </tbody>
       </Table>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 text-sm text-ink-muted">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 text-sm text-ink-muted sm:px-6">
         <span>{total ? `${formatNumber((page - 1) * RECIPIENT_PAGE + 1)}–${formatNumber(Math.min(total, page * RECIPIENT_PAGE))} of ${formatNumber(total)}` : "0 recipients"}</span>
-        <div className="flex gap-2">
+        <div className="ml-auto flex gap-2">
           {page > 1 ? <Link href={href({ page: page - 1 })} scroll={false} className="rounded-full border border-mist px-4 py-1.5 font-semibold text-ink hover:bg-mist-100">Previous</Link> : null}
           {page < pages ? <Link href={href({ page: page + 1 })} scroll={false} className="rounded-full border border-mist px-4 py-1.5 font-semibold text-ink hover:bg-mist-100">Next</Link> : null}
         </div>

@@ -67,7 +67,7 @@ export function CompanyLogoField({ initial }: { initial: { src: string; align: A
               <div className="mt-3 space-y-1.5" aria-hidden="true"><div className="h-2 w-4/5 rounded bg-mist" /><div className="h-2 w-3/5 rounded bg-mist" /></div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="ml-auto flex flex-wrap justify-end gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => input.current?.click()} disabled={busy}>
               {busy ? <Spinner className="h-4 w-4" /> : <ImagePlus className="h-4 w-4" aria-hidden="true" />}
               {logo.src ? "Replace logo" : "Upload logo"}

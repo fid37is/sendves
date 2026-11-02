@@ -43,7 +43,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
       <div className="mt-8 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <Card>
           <CardHeader title="Clicks over time" description={`Last ${days} days`} />
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <TrendChart
               ariaLabel={`Clicks and unique clickers per day over the last ${days} days`}
               dates={series.map((d) => d.date)}
@@ -69,7 +69,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader title="Emails sent per day" description="Volume and deliveries" />
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <TrendChart
               height={220}
               ariaLabel={`Emails sent and delivered per day over the last ${days} days`}
@@ -107,11 +107,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
               {campaigns.map((c) => (
                 <tr key={c.id}>
                   <TD><Link href={`/app/campaigns/${c.id}`} className="font-semibold text-ink hover:text-brand-800 hover:underline">{c.name}</Link></TD>
-                  <TD>{formatNumber(c.sent)}</TD>
-                  <TD>{formatNumber(c.clicks)}{c.totalClicks > c.clicks ? <span className="text-xs text-ink-muted"> ({formatNumber(c.totalClicks)} total)</span> : null}</TD>
-                  <TD className="font-semibold text-ink">{c.clickRate}</TD>
-                  <TD>{pct(c.bounced, c.sent)}</TD>
-                  <TD>{c.date}</TD>
+                  <TD label="Sent">{formatNumber(c.sent)}</TD>
+                  <TD label="Clicks">{formatNumber(c.clicks)}{c.totalClicks > c.clicks ? <span className="text-xs text-ink-muted"> ({formatNumber(c.totalClicks)} total)</span> : null}</TD>
+                  <TD label="Click rate" className="font-semibold text-ink">{c.clickRate}</TD>
+                  <TD label="Bounced">{pct(c.bounced, c.sent)}</TD>
+                  <TD label="Date">{c.date}</TD>
                 </tr>
               ))}
               {campaigns.length === 0 ? <EmptyRow cols={6} message="No sent campaigns yet. Reports appear after your first send." /> : null}

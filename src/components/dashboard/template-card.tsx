@@ -35,32 +35,31 @@ export function TemplateCard({ id, name, description, doc, own = false, canUse =
       <div className="p-5">
         <h2 className="font-bold text-ink">{name}</h2>
         <p className="mt-1 text-sm text-ink-muted">{description}</p>
-        <div className="mt-4 flex items-center gap-2">
+        {/* Actions are always on the right: the least used first, the main one ("Use template") last. */}
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          {own && canManage ? (
+            <>
+              <ConfirmIconButton
+                label={`Delete ${name}`}
+                action={deleteTemplateAction}
+                fields={{ id }}
+                confirm={{ title: `Delete “${name}”?`, description: "The template is removed. Campaigns already made from it are not affected. This can’t be undone.", confirmLabel: "Delete template", tone: "danger" }}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </ConfirmIconButton>
+              <form action={duplicateTemplateAction}>
+                <input type="hidden" name="id" value={id} />
+                <Button type="submit" variant="ghost" size="sm" aria-label={`Duplicate ${name}`} title="Duplicate"><Copy className="h-4 w-4" aria-hidden="true" /></Button>
+              </form>
+              {editable ? <ButtonLink href={`/app/templates/${id}`} variant="outline" size="sm">Edit</ButtonLink> : null}
+            </>
+          ) : null}
           {/* Creates the draft and opens it in the campaign editor. */}
           {canUse ? (
             <form action={startFromTemplateAction}>
               <input type="hidden" name="template" value={id} />
               <UseButton />
             </form>
-          ) : null}
-          {own && canManage ? (
-            <>
-              {editable ? <ButtonLink href={`/app/templates/${id}`} variant="outline" size="sm">Edit</ButtonLink> : null}
-              <form action={duplicateTemplateAction}>
-                <input type="hidden" name="id" value={id} />
-                <Button type="submit" variant="ghost" size="sm" aria-label={`Duplicate ${name}`} title="Duplicate"><Copy className="h-4 w-4" aria-hidden="true" /></Button>
-              </form>
-              <span className="ml-auto">
-                <ConfirmIconButton
-                  label={`Delete ${name}`}
-                  action={deleteTemplateAction}
-                  fields={{ id }}
-                  confirm={{ title: `Delete “${name}”?`, description: "The template is removed. Campaigns already made from it are not affected. This can’t be undone.", confirmLabel: "Delete template", tone: "danger" }}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                </ConfirmIconButton>
-              </span>
-            </>
           ) : null}
         </div>
       </div>

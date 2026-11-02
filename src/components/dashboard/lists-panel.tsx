@@ -147,7 +147,7 @@ export function ListsRail({ lists, total, currentId, unassigned, departments, or
             </Button>
           ) : null}
         </div>
-        <nav aria-label="Contact lists" className="flex gap-1 overflow-x-auto p-2 lg:flex-col lg:overflow-visible">
+        <nav aria-label="Contact lists" className="flex max-h-44 flex-wrap gap-1 overflow-y-auto p-2 lg:max-h-none lg:flex-col lg:flex-nowrap lg:overflow-visible">
           <Link href="/app/contacts" aria-current={all ? "page" : undefined} className={item(all)}>
             <span>All contacts</span>
             {count(total)}
