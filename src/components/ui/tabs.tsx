@@ -6,9 +6,6 @@ export type TabItem = { key: string; label: string; href: string; count?: number
 /** Page-level tabs that are plain links (the active tab lives in the URL), so they work without JavaScript and can be bookmarked. */
 export function LinkTabs({ tabs, active, label = "Sections" }: { tabs: TabItem[]; active: string; label?: string }) {
   return (
-    // The rule under the tabs is drawn by this wrapper, and the row slides down by 1px to sit on it. Putting the
-    // overlap on the scrolling row itself (a negative margin on each tab) made the row 1px taller than its box,
-    // which browsers show as a tiny vertical scrollbar even though nothing scrolls.
     <div className="mb-6 border-b border-mist">
     <nav aria-label={label} className="-mb-px flex gap-1 overflow-x-auto overflow-y-hidden">
       {tabs.map((t) => {

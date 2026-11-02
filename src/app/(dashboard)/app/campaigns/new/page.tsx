@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import type { SearchParams } from "@/types";
 import { Field, Input } from "@/components/ui/input";
+import { FormActions } from "@/components/ui/form-actions";
+import { ActionButton } from "@/components/ui/submit-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { BUILT_IN_TEMPLATES } from "@/lib/email/campaign";
 import { getTemplates } from "@/lib/queries";
@@ -27,7 +29,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
   return (
     <>
       <PageHeader title="New campaign" description="Name it and pick a starting point. You’ll set the subject, audience and content next." />
-      <Card className="max-w-3xl">
+      <Card>
         <CardHeader title="Start" />
         <form action={createCampaignAction} className="space-y-6 p-6">
           <Field label="Campaign name" htmlFor="name" hint="Only you see this."><Input id="name" name="name" placeholder="October newsletter" required /></Field>
@@ -35,10 +37,10 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
             <legend className="mb-3 text-sm font-semibold text-ink">Starting point</legend>
             <TemplatePicker options={options} selected={selected} />
           </fieldset>
-          <div className="flex gap-3">
-            <Button type="submit">Create campaign</Button>
+          <FormActions>
             <ButtonLink href="/app/campaigns" variant="outline">Cancel</ButtonLink>
-          </div>
+            <ActionButton>Create campaign</ActionButton>
+          </FormActions>
         </form>
       </Card>
     </>

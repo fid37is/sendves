@@ -9,7 +9,7 @@ import { env } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/server/audit";
 
-const BACK = "/account";
+const BACK = "/settings#account";
 const MIN_PASSWORD = 12;
 
 export async function updateProfileAction(formData: FormData) {

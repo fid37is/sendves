@@ -19,7 +19,7 @@ const checklistItems = [
   { label: "Verify your account email", href: "/app/settings" },
   { label: "Add your business address", href: "/app/settings" },
   { label: "Verify a sending domain", href: "/app/domains" },
-  { label: "Import your contacts", href: "/app/contacts/import" },
+  { label: "Import your contacts", href: "/app/contacts?import=1" },
   { label: "Send your first campaign", href: "/app/campaigns/new" },
 ];
 

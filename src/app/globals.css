@@ -106,12 +106,20 @@
     color: rgb(255 255 255);
   }
 
+  /* Loading spinner: fast and always moving. */
+  .spinner {
+    animation: spinner-rotate 0.6s linear infinite;
+  }
+
   /* FAQ answers ease open. */
   details.faq-item[open] > p {
     animation: rise 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   }
 }
 
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
 @keyframes rise {
   from { opacity: 0; transform: translateY(18px); }
   to { opacity: 1; transform: none; }
@@ -179,6 +187,11 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     transition-delay: 0s !important;
+  }
+  /* A loading spinner is feedback, not decoration: it keeps spinning (a little slower). */
+  .spinner {
+    animation-duration: 0.9s !important;
+    animation-iteration-count: infinite !important;
   }
   /* Purely decorative loops are removed rather than frozen. */
   .animate-drift { display: none; }

@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Download, Upload } from "lucide-react";
-import { ButtonLink, Button, buttonStyles } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { SearchParams } from "@/types";
 import { Input, Select } from "@/components/ui/input";
@@ -13,8 +12,10 @@ import { can } from "@/lib/access";
 import { NoAccess } from "@/components/dashboard/no-access";
 import { getContext } from "@/lib/workspace";
 import { AddContactsButton } from "@/components/dashboard/add-contacts-drawer";
+import { ImportContactsButton } from "@/components/dashboard/import-contacts-drawer";
+import { ExportContactsButton } from "@/components/dashboard/export-contacts-drawer";
 import { ContactsTable } from "@/components/dashboard/contacts-table";
-import { ListHeader, ListsRail } from "@/components/dashboard/lists-panel";
+import { ListSettingsButton, ListsRail } from "@/components/dashboard/lists-panel";
 
 export const metadata: Metadata = { title: "Contacts" };
 
@@ -61,14 +62,10 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
         description={description}
         action={
           <div className="flex flex-wrap gap-3">
-            <a href={`/api/contacts/export${current ? `?list=${current.id}` : ""}`} className={buttonStyles({ variant: "outline" })}>
-              <Download className="h-4 w-4" aria-hidden="true" />Export{current ? " list" : ""}
-            </a>
+            <ExportContactsButton lists={lists.map(({ id, name, count }) => ({ id, name, count }))} total={totalContacts} defaultListId={current?.id} />
             {manage ? (
               <>
-                <ButtonLink href={`/app/contacts/import${current ? `?list=${current.id}` : ""}`} variant="outline">
-                  <Upload className="h-4 w-4" aria-hidden="true" />Import CSV
-                </ButtonLink>
+                <ImportContactsButton lists={lists.map(({ id, name }) => ({ id, name }))} defaultListId={current?.id} initialOpen={searchParams.import === "1"} />
                 <AddContactsButton lists={lists.map(({ id, name }) => ({ id, name }))} defaultListId={current?.id} />
               </>
             ) : null}
@@ -80,9 +77,9 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
         <ListsRail lists={lists} total={totalContacts} currentId={current?.id ?? null} unassigned={unassigned} departments={departments} orgWideAllowed={orgWideAllowed} canCreate={manage} />
 
         <div className="min-w-0 space-y-4">
-          {current ? <ListHeader list={current} signupUrl={`${siteConfig.url}/subscribe/${current.id}`} /> : null}
           <Card>
-            <form className="flex flex-wrap gap-3 border-b border-mist p-4" action="/app/contacts">
+            <div className="flex flex-wrap items-center gap-3 border-b border-mist p-4">
+            <form className="flex min-w-0 flex-1 flex-wrap items-center gap-3" action="/app/contacts">
               {listParam ? <input type="hidden" name="list" value={listParam} /> : null}
               <Input name="q" defaultValue={searchParams.q} type="search" placeholder="Search by name or email" aria-label="Search contacts" className="max-w-xs" />
               <Select name="status" defaultValue={searchParams.status ?? ""} aria-label="Filter by status" className="max-w-[180px]">
@@ -91,6 +88,8 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
               </Select>
               <Button type="submit" variant="outline">Filter</Button>
             </form>
+            {current ? <ListSettingsButton list={current} signupUrl={`${siteConfig.url}/subscribe/${current.id}`} className="ml-auto" /> : null}
+            </div>
 
             <ContactsTable rows={rows} lists={lists} current={current ? { id: current.id, name: current.name } : null} emptyMessage={emptyMessage} />
 

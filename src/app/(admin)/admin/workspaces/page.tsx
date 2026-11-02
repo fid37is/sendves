@@ -18,7 +18,7 @@ export default async function AdminWorkspacesPage({ searchParams }: { searchPara
   const count = (s: string) => workspaces.filter((w) => w.status === s).length;
   return (
     <>
-      <PageHeader title="Workspaces" description="Every customer organization. Open one to see its people, campaigns, domains and limits, or to suspend it." />
+      <PageHeader title="Workspaces" description="Every customer organization. New ones start In review: their first campaign waits for your approval, and approving it (or the workspace) makes them Active. Open one to manage it." />
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Shown" value={formatNumber(workspaces.length)} note="Up to the 200 most recent matches" />
         <StatCard label="Active" value={formatNumber(count("active"))} />

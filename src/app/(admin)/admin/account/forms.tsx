@@ -21,7 +21,7 @@ export function ChangePasswordForm() {
       <Field label="Current password" htmlFor="current"><PasswordInput id="current" name="current" autoComplete="current-password" required /></Field>
       <Field label="New password" htmlFor="password" hint="At least 12 characters."><PasswordInput id="password" name="password" autoComplete="new-password" minLength={12} required /></Field>
       <Field label="Confirm new password" htmlFor="confirmPassword"><PasswordInput id="confirmPassword" name="confirmPassword" autoComplete="new-password" minLength={12} required /></Field>
-      <SubmitButton pendingText="Changing…" className="w-auto">Change password</SubmitButton>
+      <div className="flex justify-end"><SubmitButton className="w-auto">Change password</SubmitButton></div>
     </form>
   );
 }

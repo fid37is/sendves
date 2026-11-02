@@ -70,9 +70,9 @@ export default async function AdminUserPage({ params }: { params: { id: string }
           <Card>
             <CardHeader title="Manage" />
             {u.role === "admin" ? (
-              <p className="p-6 text-sm text-ink-muted">Platform admins are managed on the <Link href="/admins" className="font-semibold text-brand-800 hover:underline">Admins</Link> page.</p>
+              <p className="p-6 text-sm text-ink-muted">Platform admins are managed on the <Link href="/settings#admins" className="font-semibold text-brand-800 hover:underline">Settings</Link> page.</p>
             ) : (
-              <div className="flex flex-wrap gap-3 p-6">
+              <div className="flex flex-wrap items-center justify-end gap-3 p-6">
                 <form action={sendPasswordResetAction}>
                   <input type="hidden" name="id" value={u.id} />
                   <ActionButton variant="outline" size="sm">Send password reset</ActionButton>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { judge } from "../src/server/abuse";
+import judge from "../src/server/abuse";
 
 const S = { pause_bounce_pct: 5, pause_complaint_pct: 0.3, suspend_complaint_pct: 0.5, health_min_sample: 50 };
 

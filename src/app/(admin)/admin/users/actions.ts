@@ -19,7 +19,7 @@ async function customer(formData: FormData) {
   if (!UUID.test(uid)) go(back, "err", "That request was invalid. Reload the page and try again.");
   const { data: p } = await db.from("profiles").select("id, email, full_name, role, recovery_email").eq("id", uid).maybeSingle();
   if (!p) go("/users", "err", "That account no longer exists.");
-  if (p.role === "admin") go(back, "err", "Platform admins are managed on the Admins page.");
+  if (p.role === "admin") go(back, "err", "Platform admins are managed in Settings.");
   return { user, db, p, back };
 }
 

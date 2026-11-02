@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -14,6 +15,12 @@ import { buildPreviewDoc, previewSubject } from "@/lib/email/preview";
 import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 
 type Action = (formData: FormData) => Promise<void>;
+
+/** Gives its children the pending state of the form it sits in (useFormStatus only works below the <form>). */
+function WhilePending({ children }: { children: (pending: boolean) => ReactNode }) {
+  const { pending } = useFormStatus();
+  return <>{children(pending)}</>;
+}
 type Props = {
   template: { id: string; name: string; description: string; subject: string; preview_text: string; blocks: Block[]; variables: VariableDef[]; departmentId: string | null };
   workspace: { name: string; business_address: string | null };
@@ -28,6 +35,7 @@ type Props = {
 
 /** Edit one of your own templates. Saved with the buttons (not automatically), with a warning before leaving unsaved changes. */
 export function TemplateEditor({ template, workspace, contactFieldKeys, departments, orgWideAllowed, canStartCampaign, actions }: Props) {
+  const [busy, setBusy] = useState<"save" | "saveAndUse" | "duplicate" | "remove" | null>(null);
   const confirm = useConfirm();
   const [name, setName] = useState(template.name);
   const [description, setDescription] = useState(template.description);
@@ -92,14 +100,18 @@ export function TemplateEditor({ template, workspace, contactFieldKeys, departme
 
         <Card>
           <CardHeader title="Save" description={dirty ? "You have unsaved changes. Duplicate copies the last saved version." : "All changes saved."} />
-          <div className="flex flex-wrap gap-3 p-6">
-            <Button type="submit" formAction={actions.save}>Save template</Button>
-            {canStartCampaign ? <Button type="submit" formAction={actions.saveAndUse} variant="secondary">Save and start a campaign</Button> : null}
-            <Button type="submit" formAction={actions.duplicate} variant="outline" title={dirty ? "Copies the last saved version" : undefined}>Duplicate</Button>
+          {/* Right-aligned. flex-row-reverse puts the first button (Save) furthest right and Delete furthest left. */}
+          <div className="flex flex-row-reverse flex-wrap justify-start gap-3 p-6">
+           <WhilePending>{(pending) => (<>
+            <Button type="submit" formAction={actions.save} loading={pending && busy === "save"} disabled={pending} onClick={() => setBusy("save")}>Save template</Button>
+            {canStartCampaign ? <Button type="submit" formAction={actions.saveAndUse} variant="secondary" loading={pending && busy === "saveAndUse"} disabled={pending} onClick={() => setBusy("saveAndUse")}>Save and start a campaign</Button> : null}
+            <Button type="submit" formAction={actions.duplicate} variant="outline" loading={pending && busy === "duplicate"} disabled={pending} onClick={() => setBusy("duplicate")} title={dirty ? "Copies the last saved version" : undefined}>Duplicate</Button>
             <Button
               type="submit"
               formAction={actions.remove}
               variant="ghost"
+              loading={pending && busy === "remove"}
+              disabled={pending}
               onClick={async (e) => {
                 const button = e.currentTarget;
                 const form = button.form;
@@ -110,11 +122,15 @@ export function TemplateEditor({ template, workspace, contactFieldKeys, departme
                   confirmLabel: "Delete template",
                   tone: "danger",
                 });
-                if (ok) form?.requestSubmit(button);
+                if (ok) {
+                  setBusy("remove");
+                  form?.requestSubmit(button);
+                }
               }}
             >
               Delete template
             </Button>
+           </>)}</WhilePending>
           </div>
         </Card>
       </div>

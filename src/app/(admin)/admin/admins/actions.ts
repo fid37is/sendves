@@ -11,7 +11,7 @@ import { sendAdminInviteEmail } from "@/server/team";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID = /^[0-9a-f-]{36}$/i;
 const DISABLED = "876000h";
-const BACK = "/admins";
+const BACK = "/settings#admins";
 
 /** A one-time link to choose a password, emailed to the new admin. */
 async function sendSetupLink(db: Db, email: string, name: string, inviter: string): Promise<boolean> {
@@ -19,7 +19,7 @@ async function sendSetupLink(db: Db, email: string, name: string, inviter: strin
   const hashed = data?.properties?.hashed_token;
   if (error || !hashed) return false;
   const link = `${env.siteUrl}/auth/callback?token_hash=${encodeURIComponent(hashed)}&type=recovery&next=/reset-password`;
-  return sendAdminInviteEmail({ to: email, name, inviter, link });
+  return sendAdminInviteEmail({ to: email, name, invitedBy: inviter, link });
 }
 
 /**

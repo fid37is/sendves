@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
+import { FormActions } from "@/components/ui/form-actions";
+import { ActionButton } from "@/components/ui/submit-button";
 import { Card, CardHeader } from "@/components/ui/card";
 import type { SearchParams } from "@/types";
 import { PageHeader } from "@/components/ui/page-header";
@@ -27,12 +29,17 @@ function Meter({ label, used, limit }: { label: string; used: number; limit: num
   );
 }
 
+const ORDER = ["free", "starter", "growth", "scale"];
+
 export default async function BillingPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await getContext();
   if (!can(ctx?.access, "billing.manage")) return <NoAccess title="Billing" what="billing" />;
   const { workspace } = await getOverview(ctx!);
   const providers = ([billingEnabled.stripe() && "stripe", billingEnabled.paystack() && "paystack"].filter(Boolean)) as ("stripe" | "paystack")[];
   const current = (ctx?.workspace?.plan ?? "free").toLowerCase();
+  const currentRank = ORDER.indexOf(current);
+  const canUpgrade = currentRank < ORDER.length - 1;
+
 
   return (
     <>
@@ -47,8 +54,18 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
             <Meter label="Contacts" used={workspace.contactsUsed} limit={workspace.contactsLimit} />
             <Meter label="Emails this month" used={workspace.sendsUsed} limit={workspace.sendsLimit} />
           </div>
+          {canUpgrade ? (
+            <div className="border-t border-mist p-6">
+              {providers.length === 0 ? (
+                <p className="mb-4 text-sm text-ink-muted">Online payment isn’t switched on yet. Send us a request and we’ll move your plan for you.</p>
+              ) : null}
+              <FormActions>
+                <ButtonLink href="#plans">Upgrade Plan</ButtonLink>
+              </FormActions>
+            </div>
+          ) : null}
         </Card>
-        <Card>
+        <Card id="plans" className="scroll-mt-24">
           <CardHeader title="Available plans" />
           <ul className="divide-y divide-mist">
             {plans.map((p) => (
@@ -57,22 +74,28 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
                 <div className="flex items-center gap-3">
                   <p className="font-bold text-ink">{p.price} <span className="font-normal text-ink-muted">{p.price === "Custom" ? "" : "/ mo"}</span></p>
                   {p.id === current ? <span className="text-xs font-semibold text-success">Current</span> : null}
-                  {(p.id === "starter" || p.id === "growth") && p.id !== current
-                    ? providers.map((pr) => (
+                  {ORDER.indexOf(p.id) > currentRank && p.id !== "scale" ? (
+                    providers.length > 0 ? (
+                      providers.map((pr) => (
                         <form key={pr} action={startCheckoutAction}>
                           <input type="hidden" name="plan" value={p.id} />
                           <input type="hidden" name="provider" value={pr} />
-                          <Button type="submit" size="sm" variant="outline">{pr === "stripe" ? "Pay by card" : "Pay with Paystack"}</Button>
+                          <ActionButton size="sm" variant={providers.length === 1 ? "primary" : "outline"}>
+                            {providers.length === 1 ? `Upgrade to ${p.name}` : pr === "stripe" ? "Pay by card" : "Pay with Paystack"}
+                          </ActionButton>
                         </form>
                       ))
-                    : null}
+                    ) : (
+                      <ButtonLink href="/contact" size="sm">Upgrade</ButtonLink>
+                    )
+                  ) : null}
+                  {p.id === "scale" && current !== "scale" ? <ButtonLink href="/contact" size="sm" variant="outline">Contact sales</ButtonLink> : null}
                 </div>
               </li>
             ))}
           </ul>
         </Card>
       </div>
-      {providers.length === 0 ? <PageToasts toasts={[{ id: "no-billing", kind: "info", message: "Online payments aren’t available yet. Contact support to change your plan." }]} /> : null}
     </>
   );
 }

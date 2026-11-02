@@ -104,7 +104,7 @@ function ToastCard({ item }: { item: Item }) {
       onMouseLeave={start}
       onFocus={stop}
       onBlur={start}
-      className="animate-toast-in pointer-events-auto flex items-center gap-2.5 rounded-xl bg-night py-2.5 pl-3.5 pr-2 text-sm text-white shadow-lg shadow-night/25 ring-1 ring-white/10"
+      className="animate-toast-in pointer-events-auto flex items-center gap-2.5 w-fit min-w-[12rem] max-w-full rounded-xl bg-night py-2.5 pl-3.5 pr-2 text-sm text-white shadow-lg shadow-night/25 ring-1 ring-white/10"
     >
       <Icon className={cn("h-[18px] w-[18px] shrink-0", icon)} aria-hidden="true" />
       <p className="min-w-0 flex-1 break-words font-medium leading-snug">
@@ -128,7 +128,7 @@ export function Toaster() {
   const list = useSyncExternalStore(subscribe, () => items, () => [] as Item[]);
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-[100] flex flex-col items-end gap-2 p-3 sm:p-5" aria-live="polite">
-      <div className="flex w-full max-w-sm flex-col gap-2">
+      <div className="flex w-full max-w-md flex-col items-end gap-2">
         {list.map((t) => (
           <ToastCard key={t.id} item={t} />
         ))}

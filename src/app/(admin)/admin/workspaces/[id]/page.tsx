@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ConfirmSubmitButton } from "@/components/ui/confirm";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { PageHeader, StatCard } from "@/components/ui/page-header";
 import { ActionButton } from "@/components/ui/submit-button";
 import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
@@ -60,6 +60,12 @@ export default async function AdminWorkspacePage({ params, searchParams }: { par
         action={
           <div className="flex flex-wrap items-center gap-3">
             <StatusBadge status={w.status} />
+            {w.status === "review" ? (
+              <ConfirmSubmitButton action={setWorkspaceStatusAction} fields={statusAction("active")} size="sm"
+                confirm={{ title: `Approve ${w.name}?`, description: "Its campaigns will send without waiting for your review. You can move it back to review at any time.", confirmLabel: "Approve workspace" }}>
+                Approve workspace
+              </ConfirmSubmitButton>
+            ) : null}
             {w.status === "active" ? (
               <ConfirmSubmitButton action={setWorkspaceStatusAction} fields={statusAction("review")} variant="outline" size="sm"
                 confirm={{ title: "Move to review?", description: "New campaigns from this workspace will wait for your approval before they send.", confirmLabel: "Move to review" }}>
@@ -72,7 +78,7 @@ export default async function AdminWorkspacePage({ params, searchParams }: { par
                 Reinstate
               </ConfirmSubmitButton>
             ) : (
-              <ConfirmSubmitButton action={setWorkspaceStatusAction} fields={statusAction("suspended")} variant="danger" size="sm"
+              <ConfirmSubmitButton action={setWorkspaceStatusAction} fields={statusAction("suspended")} variant={w.status === "review" ? "outline" : "danger"} size="sm"
                 confirm={{ title: `Suspend ${w.name}?`, description: "Sending stops immediately for everyone in this workspace. Their data is kept and you can reinstate it at any time.", confirmLabel: "Suspend workspace", tone: "danger" }}>
                 Suspend
               </ConfirmSubmitButton>
@@ -231,41 +237,27 @@ export default async function AdminWorkspacePage({ params, searchParams }: { par
       {tab === "limits" ? (
         <div className="grid max-w-2xl gap-6">
           <Card>
-            <CardHeader title="Subscription" description="Where this plan comes from." />
+            <CardHeader title="Subscription" description="The plan comes from the customer’s subscription, not from the console." />
             <FactList
               items={[
                 { label: "Plan", value: planName },
-                { label: "Billing", value: w.billing.ref ? `Subscribed through ${w.billing.provider ?? "the payment provider"}` : <span className="text-ink-muted">No subscription: set by hand or left on the signup default</span> },
+                { label: "Billing", value: w.billing.subscribed ? `Active subscription via ${w.billing.provider || "billing provider"}` : "No subscription (free plan)" },
               ]}
             />
-            <p className="border-t border-mist px-6 py-4 text-sm text-ink-muted">
-              When a customer pays, billing sets the plan and its limits automatically, and puts them back to Free if the subscription ends. The form below
-              writes the same values directly. It does not start or cancel a subscription, so a later billing event can overwrite what you set here.
-            </p>
+            <p className="border-t border-mist px-6 py-4 text-sm text-ink-muted">To change a plan, the customer upgrades or cancels from their Billing page. Billing then sets the plan and its limits automatically.</p>
           </Card>
           <Card>
-            <CardHeader title="Plan and limits" description="Changes apply immediately and are written to the audit log." />
+            <CardHeader title="Limit overrides" description={`Plan defaults: ${formatNumber(w.planLimits.maxDaily)} emails per day, ${formatNumber(w.planLimits.contacts)} contacts. An override lasts until the subscription changes.`} />
             <form action={updateWorkspaceLimitsAction} className="grid gap-5 p-6 sm:grid-cols-2">
               <input type="hidden" name="id" value={w.id} />
               <input type="hidden" name="back" value="detail" />
-              <input type="hidden" name="tab" value="limits" />
-              <Field label="Plan" htmlFor="plan" hint={`Plan defaults: ${formatNumber(w.planLimits.startDaily)} emails per day to start (up to ${formatNumber(w.planLimits.maxDaily)}), ${formatNumber(w.planLimits.contacts)} contacts.`}>
-                <Select id="plan" name="plan" defaultValue={w.plan}>
-                  {plans.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
-                </Select>
+              <Field label="Daily send limit" htmlFor="daily" hint="Emails this workspace may send per day.">
+                <Input id="daily" name="daily" type="number" min={1} max={1000000} defaultValue={w.dailyLimit} required />
               </Field>
-              <span className="hidden sm:block" />
-              <Field label="Daily send limit" htmlFor="daily" hint="Emails this workspace may send per day. Healthy campaigns raise it automatically, up to the plan’s maximum.">
-                <Input id="daily" name="daily" type="number" min={1} max={1000000} defaultValue={w.dailyLimit} />
+              <Field label="Contact limit" htmlFor="contacts" hint="People it can store across all lists.">
+                <Input id="contacts" name="contacts" type="number" min={1} max={10000000} defaultValue={w.maxContacts} required />
               </Field>
-              <Field label="Contact limit" htmlFor="contacts" hint="People it can store across all lists. This is the limit that is enforced.">
-                <Input id="contacts" name="contacts" type="number" min={1} max={10000000} defaultValue={w.maxContacts} />
-              </Field>
-              <label className="flex items-start gap-3 text-sm text-ink sm:col-span-2">
-                <input type="checkbox" name="reset" className="mt-1 h-4 w-4 rounded border-mist" />
-                <span><span className="font-semibold">Use this plan’s default limits instead</span><span className="block text-xs text-ink-muted">Ignores the two numbers above. Handy after changing the plan.</span></span>
-              </label>
-              <div className="sm:col-span-2"><ActionButton>Save changes</ActionButton></div>
+              <div className="flex justify-end sm:col-span-2"><ActionButton requireChange>Save limits</ActionButton></div>
             </form>
           </Card>
         </div>

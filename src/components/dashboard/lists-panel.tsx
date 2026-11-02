@@ -7,10 +7,12 @@ import { useRouter } from "next/navigation";
 import { Check, Copy, FolderPlus, Settings2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { FormActions } from "@/components/ui/form-actions";
 import { Field, Input, Select } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Drawer } from "@/components/dashboard/drawer";
 import { createListAction, deleteListAction, renameListAction } from "@/app/(dashboard)/app/contacts/actions";
 
@@ -73,7 +75,7 @@ function NewListDrawer({ open, onClose, departments = [], orgWideAllowed = true 
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="submit" form={formId} disabled={saving}>{saving ? "Creating…" : "Create list"}</Button>
+          <Button type="submit" form={formId} loading={saving}>Create list</Button>
         </div>
       }
     >
@@ -188,10 +190,11 @@ function CopyButton({ value }: { value: string }) {
   };
 
   return (
-    <Button size="sm" variant="outline" onClick={copy}>
-      {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
-      {copied ? "Copied" : "Copy link"}
-    </Button>
+    <Tooltip label={copied ? "Copied" : "Copy link"} align="end" className="shrink-0">
+      <Button variant="outline" onClick={copy} aria-label={copied ? "Link copied" : "Copy link"} className="!px-3">
+        {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -268,7 +271,7 @@ function ListSettingsDrawer({ list, signupUrl, open, onClose }: { list: ListSumm
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button type="submit" form={formId} disabled={busy}>{saving ? "Saving…" : "Save name"}</Button>
+          <Button type="submit" form={formId} loading={saving} disabled={busy || name.trim() === list.name}>Save name</Button>
         </div>
       }
     >
@@ -300,31 +303,30 @@ function ListSettingsDrawer({ list, signupUrl, open, onClose }: { list: ListSumm
           <p className="mt-1 text-xs text-ink-muted">
             Contacts stay in your account; only the list goes away, and its signup page stops working. A list can’t be deleted while a draft, scheduled or sending campaign uses it.
           </p>
-          <Button variant="danger" size="sm" className="mt-3" onClick={remove} disabled={busy}>
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-            {deleting ? "Deleting…" : "Delete list"}
-          </Button>
+          <FormActions className="mt-3">
+            <Button variant="danger" size="sm" onClick={remove} loading={deleting} disabled={busy}>
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              Delete list
+            </Button>
+          </FormActions>
         </div>
       </div>
     </Drawer>
   );
 }
 
-/** Heading for the list being viewed, with its settings. */
-export function ListHeader({ list, signupUrl }: { list: ListSummary; signupUrl: string }) {
+/**
+ * Opens the settings of the list being viewed. It sits in the table's toolbar, so viewing a list adds
+ * no extra heading above the table and nothing on the page moves.
+ */
+export function ListSettingsButton({ list, signupUrl, className }: { list: ListSummary; signupUrl: string; className?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-bold text-ink">{list.name}</h2>
-          <p className="text-sm text-ink-muted">{list.count.toLocaleString("en-US")} {list.count === 1 ? "contact" : "contacts"}</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)} aria-haspopup="dialog">
-          <Settings2 className="h-4 w-4" aria-hidden="true" />
-          List settings
-        </Button>
-      </div>
+      <Button variant="outline" onClick={() => setOpen(true)} aria-haspopup="dialog" className={className}>
+        <Settings2 className="h-4 w-4" aria-hidden="true" />
+        List settings
+      </Button>
       <ListSettingsDrawer list={list} signupUrl={signupUrl} open={open} onClose={() => setOpen(false)} />
     </>
   );

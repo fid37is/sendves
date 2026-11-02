@@ -16,8 +16,6 @@ const nav: ShellNavItem[] = [
   { label: "Suppression list", href: "/suppression", icon: "ban" },
   { label: "Audit log", href: "/audit", icon: "history" },
   { label: "Settings", href: "/settings", icon: "settings" },
-  { label: "Admins", href: "/admins", icon: "shield" },
-  { label: "My account", href: "/account", icon: "account" },
 ];
 
 export const dynamic = "force-dynamic";

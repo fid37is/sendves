@@ -31,7 +31,7 @@ export function TemplatePicker({ options, selected }: { options: PickerOption[];
           <p className="mt-1.5 text-xs text-ink-muted" role="status">{term ? `${shown} of ${options.length} templates` : `${options.length} templates`}</p>
         </div>
       ) : null}
-      <div className={searchable || options.length > 6 ? "max-h-[26rem] overflow-y-auto pr-1" : undefined} tabIndex={searchable || options.length > 6 ? 0 : undefined} aria-label="Templates">
+      <div className={searchable || options.length > 6 ? "max-h-[32rem] overflow-y-auto pr-1" : undefined} tabIndex={searchable || options.length > 6 ? 0 : undefined} aria-label="Templates">
         {groups.map((g) => {
           const list = options.filter((o) => o.group === g.key);
           if (!list.length) return null;
@@ -39,7 +39,7 @@ export function TemplatePicker({ options, selected }: { options: PickerOption[];
           return (
             <section key={g.key} className={visible === 0 ? "hidden" : "mb-4 last:mb-0"}>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">{g.title} <span className="font-normal normal-case">({list.length})</span></h3>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,18rem),1fr))]">
                 {list.map((t) => (
                   <label key={t.id} className={`cursor-pointer items-start gap-3 rounded-2xl border border-mist p-4 hover:border-brand-500 has-[:checked]:border-brand-700 has-[:checked]:bg-brand-50 ${matches.has(t.id) ? "flex" : "hidden"}`}>
                     <input type="radio" name="template" value={t.id} defaultChecked={t.id === selected} className="mt-1 accent-brand-700" />

@@ -9,7 +9,7 @@ import { startFromTemplateAction, deleteTemplateAction, duplicateTemplateAction 
 
 function UseButton() {
   const { pending } = useFormStatus();
-  return <Button type="submit" variant="secondary" size="sm" disabled={pending}>{pending ? "Opening…" : "Use template"}</Button>;
+  return <Button type="submit" variant="secondary" size="sm" loading={pending}>Use template</Button>;
 }
 
 type Props = {

@@ -22,6 +22,18 @@ export type Workspace = {
   track_opens: boolean;
   billing_provider: string | null;
   billing_ref: string | null;
+  // Company profile (migration 0010). Optional so the app still runs before that migration is applied.
+  company_website?: string | null;
+  company_email?: string | null;
+  company_phone?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_city?: string | null;
+  address_region?: string | null;
+  address_postal_code?: string | null;
+  address_country?: string | null;
+  brand_color?: string | null;
+  email_footer_text?: string | null;
 };
 
 /** An organization the signed-in person belongs to. */
