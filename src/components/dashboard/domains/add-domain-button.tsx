@@ -16,9 +16,10 @@ export function AddDomainButton() {
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} aria-haspopup="dialog">
+      <Button onClick={() => setOpen(true)} aria-haspopup="dialog" aria-label="Add domain">
         <Plus className="h-4 w-4" aria-hidden="true" />
-        Add domain
+        <span className="sm:hidden">Add</span>
+        <span className="hidden sm:inline">Add domain</span>
       </Button>
       <FormDrawer
         open={open}

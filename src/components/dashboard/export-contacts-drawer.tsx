@@ -67,7 +67,7 @@ export function ExportContactsButton({ lists, total, defaultListId }: { lists: L
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)} aria-haspopup="dialog">
+      <Button variant="outline" className="whitespace-nowrap max-sm:px-3" onClick={() => setOpen(true)} aria-haspopup="dialog">
         <Download className="h-4 w-4" aria-hidden="true" />
         Export
       </Button>

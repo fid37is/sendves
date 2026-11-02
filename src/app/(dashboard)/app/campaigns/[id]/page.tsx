@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { ConfirmSubmitButton } from "@/components/ui/confirm";
 import { Card, CardHeader } from "@/components/ui/card";
 import { PageToasts, type ToastKind } from "@/components/ui/toast";
@@ -9,6 +9,8 @@ import { StatusBadge } from "@/components/ui/badge";
 import { EmptyRow, Table, TD, TH } from "@/components/ui/table";
 import { Funnel, TrendChart } from "@/components/charts/trend-chart";
 import { CampaignEditor } from "@/components/dashboard/campaign-editor";
+import { MailFrame } from "@/components/editor/mail-frame";
+import { buildSentDoc } from "@/lib/email/campaign-preview";
 import { pct } from "@/lib/analytics";
 import { getAudienceOptions, getCampaignAudienceDetail, getCampaignDetail, getContactFieldKeys, getDomains, getSenderIdentities } from "@/lib/queries";
 import { can } from "@/lib/access";
@@ -90,6 +92,15 @@ export default async function CampaignPage({ params }: { params: { id: string };
   if (c.status === "paused") toasts.push({ id: `paused-${c.id}`, kind: "warning", message: c.pause_reason ? `Sending is paused: ${c.pause_reason}` : "Sending is paused. If this was automatic, a high bounce or complaint rate triggered it." });
 
   const maxLinkClicks = Math.max(1, ...links.map((l) => l.clicks));
+  const sentDoc = c.html
+    ? buildSentDoc(c.html, {
+        tz: ctx.workspace.timezone || "UTC",
+        variables: sanitizeVariables(c.variables),
+        businessAddress: ctx.workspace.business_address ?? null,
+        workspaceName: ctx.workspace.name,
+        sentAt: c.started_at ? new Date(c.started_at).getTime() : undefined,
+      })
+    : null;
 
   return (
     <>
@@ -100,6 +111,7 @@ export default async function CampaignPage({ params }: { params: { id: string };
         action={
           <div className="flex flex-wrap items-center justify-end gap-3">
             <StatusBadge status={c.status} />
+            {sentDoc ? <ButtonLink href="#sent-email" variant="outline" size="sm">View email</ButtonLink> : null}
             {canPause ? <form action={pauseCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" variant="outline" size="sm">Pause</Button></form> : null}
             {canResume ? <form action={resumeCampaignAction}><input type="hidden" name="id" value={c.id} /><Button type="submit" size="sm">Resume</Button></form> : null}
             {canCancel ? (
@@ -193,6 +205,18 @@ export default async function CampaignPage({ params }: { params: { id: string };
           </tbody>
         </Table>
       </Card>
+
+      {sentDoc ? (
+        <Card className="mt-8 scroll-mt-6" id="sent-email">
+          <CardHeader title="The email" description="As it was stored for sending. Each person got their own copy, so personal details show their fallback here." />
+          <div className="bg-mist-50 p-3 sm:p-6">
+            <div className="mx-auto w-full max-w-[640px]">
+              <div className="mb-2.5 text-[13px] text-ink-muted"><b className="text-ink">{c.subject || "(no subject)"}</b>{c.preview_text ? ` — ${c.preview_text}` : ""}</div>
+              <MailFrame doc={sentDoc} title="The email as sent" />
+            </div>
+          </div>
+        </Card>
+      ) : null}
     </>
   );
 }

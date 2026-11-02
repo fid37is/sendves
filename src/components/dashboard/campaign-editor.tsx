@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowLeft, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { BUILT_IN_VARIABLES, isBuiltInVariable, sanitizeVariables, type VariableDef } from "@/lib/email/variables";
@@ -534,6 +535,15 @@ export function CampaignEditor(props: Props) {
     }
   };
 
+  // Exit saves what is pending first, then goes back to the campaigns list (the draft is there to continue).
+  const [exiting, setExiting] = useState(false);
+  const exit = async () => {
+    if (exiting) return;
+    setExiting(true);
+    if (await saveNow()) router.push("/app/campaigns");
+    else setExiting(false);
+  };
+
   const [testing, setTesting] = useState(false);
   const sendTest = async () => {
     if (testing) return;
@@ -558,6 +568,10 @@ export function CampaignEditor(props: Props) {
     >
       {step !== "preview" ? (
         <header className="flex items-center gap-3 border-b border-mist bg-white px-4 py-2.5 sm:px-5">
+          <Button size="sm" variant="outline" loading={exiting} onClick={exit} className="shrink-0 max-[760px]:w-9 max-[760px]:!px-0" aria-label="Save and exit" title="Save and exit">
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            <span className="max-[760px]:sr-only">Exit</span>
+          </Button>
           <h1 className="max-w-[40%] truncate text-[15px] font-bold text-ink max-[760px]:hidden">{campaign.name}</h1>
           <nav aria-label="Steps" className="flex gap-1">
             {steps.map(([k, label]) => (
@@ -594,10 +608,12 @@ export function CampaignEditor(props: Props) {
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-1 pt-3 sm:px-4">
-                <Button size="sm" variant="outline" disabled={historyLength === 0} onClick={undo}>Undo</Button>
-                <Button size="sm" variant="outline" onClick={() => openPanel(custom ? "blocks" : "tpl")}>{custom ? "Add content" : "Change template"}</Button>
-                <Button size="sm" variant="outline" loading={testing} onClick={sendTest}>Send test</Button>
+              <div className="flex flex-nowrap items-center justify-end gap-2 px-3 pb-1 pt-3 sm:px-4">
+                <Button size="sm" variant="outline" className="w-9 shrink-0 !px-0" disabled={historyLength === 0} onClick={undo} aria-label="Undo" title="Undo">
+                  <Undo2 className="h-4 w-4" aria-hidden="true" />
+                </Button>
+                <Button size="sm" variant="outline" className="whitespace-nowrap" onClick={() => openPanel(custom ? "blocks" : "tpl")}>{custom ? "Add content" : "Change template"}</Button>
+                <Button size="sm" variant="outline" className="whitespace-nowrap" loading={testing} onClick={sendTest}>Send test</Button>
               </div>
               <div className="mx-auto mb-2 mt-1 rounded-full border border-mist bg-white px-3 py-0.5 text-xs text-ink-muted">
                 {design.tpl === "custom" ? "Custom layout" : `${TEMPLATE_NAMES[design.tpl]} template`}

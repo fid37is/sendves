@@ -63,7 +63,8 @@ export function AppShell({
   useEffect(() => setPendingHref(null), [pathname]);
 
   // Back link: a page inside a section (a campaign, the import page) goes back to that section's
-  // list; a section's own page goes back to the home page; the home page has none.
+  // list. A section's own page (Campaigns, Contacts…) and the home page have none: they are reached
+  // from the menu, and "back" from them would only be the Overview.
   const back = (() => {
     if (!root || pathname === root) return null;
     let section: ShellNavItem | undefined;
@@ -72,7 +73,7 @@ export function AppShell({
       const inside = pathname === item.href || pathname.startsWith(`${item.href}/`);
       if (inside && (!section || item.href.length > section.href.length)) section = item;
     }
-    if (section && pathname !== section.href) return { href: section.href, label: section.label };
+    if (section) return pathname !== section.href ? { href: section.href, label: section.label } : null;
     return { href: root, label: nav[0].label };
   })();
 

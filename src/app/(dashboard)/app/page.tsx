@@ -41,7 +41,7 @@ export default async function OverviewPage(_props: { searchParams: SearchParams 
       <PageHeader
         title="Overview"
         description="Where your audience and campaigns stand today."
-        action={<ButtonLink href="/app/campaigns/new"><Plus className="h-4 w-4" aria-hidden="true" />New campaign</ButtonLink>}
+        action={<ButtonLink href="/app/campaigns/new" aria-label="New campaign"><Plus className="h-4 w-4" aria-hidden="true" /><span className="sm:hidden">New</span><span className="hidden sm:inline">New campaign</span></ButtonLink>}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

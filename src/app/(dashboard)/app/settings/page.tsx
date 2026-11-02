@@ -28,6 +28,11 @@ export default async function SettingsPage() {
   const hasParts = Boolean(ws?.address_line1 || ws?.address_city || ws?.address_country);
   const line1 = hasParts ? ws?.address_line1 ?? "" : ws?.business_address ?? "";
 
+  // First save vs update, for the short mobile button label.
+  const companySaved = Boolean(ws?.business_address);
+  const brandSaved = Boolean(ws?.brand_color || logo.src);
+  const emailSaved = Boolean(ws?.email_footer_text || (ws?.timezone && ws.timezone !== "UTC"));
+
   const zones: string[] = [...TIME_ZONES];
   if (ws?.timezone && !zones.includes(ws.timezone) && isTimeZone(ws.timezone)) zones.unshift(ws.timezone);
 
@@ -77,7 +82,7 @@ export default async function SettingsPage() {
                     <Field label="Postal code" htmlFor="postalCode"><Input id="postalCode" name="postalCode" defaultValue={ws?.address_postal_code ?? ""} maxLength={20} autoComplete="postal-code" /></Field>
                     <Field label="Country" htmlFor="country"><Input id="country" name="country" defaultValue={ws?.address_country ?? ""} maxLength={80} autoComplete="country-name" /></Field>
                   </div>
-                  <FormActions className="mt-6"><ActionButton requireChange>Save company details</ActionButton></FormActions>
+                  <FormActions className="mt-6"><ActionButton requireChange mobileLabel={companySaved ? "Update" : "Save"}>Save company details</ActionButton></FormActions>
                 </div>
               </form>
             </Card>
@@ -112,7 +117,7 @@ export default async function SettingsPage() {
                       className="h-11 w-20 cursor-pointer rounded-xl border border-mist bg-white p-1 hover:border-ink/30 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20" />
                   </Field>
                 </div>
-                <FormActions><ActionButton>Save branding</ActionButton></FormActions>
+                <FormActions><ActionButton mobileLabel={brandSaved ? "Update" : "Save"}>Save branding</ActionButton></FormActions>
               </form>
             </Card>
           </SettingsSection>
@@ -136,7 +141,7 @@ export default async function SettingsPage() {
                   <input type="checkbox" name="trackOpens" defaultChecked={ws?.track_opens ?? true} className="mt-0.5 h-4 w-4 accent-brand-700" />
                   Track opens. Opens are unreliable because mail apps can hide them; click tracking stays on either way.
                 </label>
-                <FormActions><ActionButton requireChange>Save email defaults</ActionButton></FormActions>
+                <FormActions><ActionButton requireChange mobileLabel={emailSaved ? "Update" : "Save"}>Save email defaults</ActionButton></FormActions>
               </form>
             </Card>
           </SettingsSection>
@@ -149,7 +154,7 @@ export default async function SettingsPage() {
             <form action={updateProfileAction} className="space-y-5 p-6">
               <Field label="Full name" htmlFor="fullName"><Input id="fullName" name="fullName" defaultValue={ctx?.user.fullName} autoComplete="name" /></Field>
               <Field label="Email address" htmlFor="email" hint="Used to sign in and to recover your account."><Input id="email" type="email" defaultValue={ctx?.user.email} readOnly /></Field>
-              <FormActions><ActionButton requireChange>Save profile</ActionButton></FormActions>
+              <FormActions><ActionButton requireChange mobileLabel="Update">Save profile</ActionButton></FormActions>
             </form>
           </Card>
         </SettingsSection>

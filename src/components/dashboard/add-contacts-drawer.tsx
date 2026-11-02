@@ -374,9 +374,10 @@ export function AddContactsButton({ lists, defaultListId }: { lists: { id: strin
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button onClick={() => setOpen(true)} aria-haspopup="dialog">
+      <Button className="whitespace-nowrap max-sm:px-3" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-label="Add contact">
         <Plus className="h-4 w-4" aria-hidden="true" />
-        Add contact
+        <span className="sm:hidden">Add</span>
+        <span className="hidden sm:inline">Add contact</span>
       </Button>
       <AddContactsDrawer
         open={open}
