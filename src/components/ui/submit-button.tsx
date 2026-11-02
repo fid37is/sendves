@@ -51,9 +51,11 @@ function formHasChanges(form: HTMLFormElement): boolean {
  * with the new values) it goes back to disabled, and after a failed save it stays enabled to try again.
  */
 export function ActionButton({
-  children, variant, size, className, requireChange = false,
+  children, mobileLabel, variant, size, className, requireChange = false,
 }: {
   children: React.ReactNode;
+  /** Short label for phones: "Save" the first time something is saved, "Update" once it has been saved before. The full label (children) shows from the sm breakpoint up. */
+  mobileLabel?: "Save" | "Update";
   variant?: React.ComponentProps<typeof Button>["variant"];
   size?: React.ComponentProps<typeof Button>["size"];
   className?: string;
@@ -85,7 +87,13 @@ export function ActionButton({
     if (form) setChanged(formHasChanges(form));
   }, [requireChange, pending]);
 
-  const button = <Button type="submit" variant={variant} size={size} className={className} loading={pending} disabled={requireChange && !changed}>{children}</Button>;
+  const label = mobileLabel ? (
+    <>
+      <span className="sm:hidden">{mobileLabel}</span>
+      <span className="hidden sm:inline">{children}</span>
+    </>
+  ) : children;
+  const button = <Button type="submit" variant={variant} size={size} className={className} loading={pending} disabled={requireChange && !changed}>{label}</Button>;
   if (!requireChange) return button;
   return (
     <span ref={anchor} className="contents">

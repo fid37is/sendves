@@ -39,9 +39,10 @@ export default async function TemplatesPage() {
         action={
           manage && useIt ? (
             <form action={createTemplateAction}>
-              <Button type="submit">
+              <Button type="submit" aria-label="New template">
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                New template
+                <span className="sm:hidden">New</span>
+                <span className="hidden sm:inline">New template</span>
               </Button>
             </form>
           ) : undefined

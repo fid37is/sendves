@@ -29,9 +29,10 @@ export default async function CampaignsPage() {
         description="Create, schedule and review your email campaigns."
         action={
           manage ? (
-            <ButtonLink href="/app/campaigns/new">
+            <ButtonLink href="/app/campaigns/new" aria-label="New campaign">
               <Plus className="h-4 w-4" aria-hidden="true" />
-              New campaign
+              <span className="sm:hidden">New</span>
+              <span className="hidden sm:inline">New campaign</span>
             </ButtonLink>
           ) : undefined
         }

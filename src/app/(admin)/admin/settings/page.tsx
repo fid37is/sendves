@@ -85,7 +85,7 @@ export default async function AdminSettingsPage() {
                     <li>The customer sees the reason on the paused campaign, and every automatic action is logged under Abuse.</li>
                   </ul>
                 </div>
-                <FormActions><ActionButton requireChange>Save enforcement settings</ActionButton></FormActions>
+                <FormActions><ActionButton requireChange mobileLabel="Update">Save enforcement settings</ActionButton></FormActions>
               </div>
             </Card>
           </form>
@@ -112,7 +112,7 @@ export default async function AdminSettingsPage() {
                   <Field label="Daily send limit" htmlFor="daily"><Input id="daily" name="daily" type="number" min="1" defaultValue={s.new_workspace_daily_limit} /></Field>
                   <Field label="Contact limit" htmlFor="max"><Input id="max" name="max" type="number" min="1" defaultValue={s.new_workspace_max_contacts} /></Field>
                 </div>
-                <FormActions><ActionButton requireChange>Save sign-up settings</ActionButton></FormActions>
+                <FormActions><ActionButton requireChange mobileLabel="Update">Save sign-up settings</ActionButton></FormActions>
               </div>
             </Card>
           </form>
@@ -151,7 +151,7 @@ export default async function AdminSettingsPage() {
                 <Field label="Full name" htmlFor="name"><Input id="name" name="name" required autoComplete="off" /></Field>
                 <Field label="Email" htmlFor="adminEmail"><Input id="adminEmail" name="email" type="email" required autoComplete="off" /></Field>
               </div>
-              <FormActions><ActionButton>Add admin</ActionButton></FormActions>
+              <FormActions><ActionButton mobileLabel="Save">Add admin</ActionButton></FormActions>
             </form>
           </Card>
         </SettingsSection>
@@ -173,7 +173,7 @@ export default async function AdminSettingsPage() {
                 <Field label="New password" htmlFor="next"><Input id="next" name="next" type="password" autoComplete="new-password" minLength={12} required /></Field>
                 <Field label="Confirm new password" htmlFor="confirm"><Input id="confirm" name="confirm" type="password" autoComplete="new-password" minLength={12} required /></Field>
               </div>
-              <FormActions><ActionButton>Change password</ActionButton></FormActions>
+              <FormActions><ActionButton mobileLabel="Update">Change password</ActionButton></FormActions>
             </form>
           </Card>
           <Card>

@@ -61,7 +61,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
         title="Contacts"
         description={description}
         action={
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex flex-nowrap justify-end gap-2 sm:gap-3">
             <ExportContactsButton lists={lists.map(({ id, name, count }) => ({ id, name, count }))} total={totalContacts} defaultListId={current?.id} />
             {manage ? (
               <>

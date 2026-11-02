@@ -45,7 +45,7 @@ export function ImportContactsButton({ lists, defaultListId, initialOpen = false
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)} aria-haspopup="dialog">
+      <Button variant="outline" className="whitespace-nowrap max-sm:px-3" onClick={() => setOpen(true)} aria-haspopup="dialog">
         <Upload className="h-4 w-4" aria-hidden="true" />
         Import CSV
       </Button>
