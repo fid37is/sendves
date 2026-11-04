@@ -48,6 +48,9 @@ export const PERMISSION_LIST = [
   { key: "templates.view", group: "Content", label: "View and use templates" },
   { key: "templates.manage", group: "Content", label: "Create, edit, duplicate and delete templates" },
   { key: "reports.view", group: "Content", label: "View reports" },
+  { key: "inbox.view", group: "Inbox", label: "Read replies to their own sender addresses and conversations assigned to them" },
+  { key: "inbox.reply", group: "Inbox", label: "Reply to contacts and send single emails" },
+  { key: "inbox.all", group: "Inbox", label: "See every conversation in the organization and assign them" },
   { key: "access.all_departments", group: "Access", label: "Access every department’s resources" },
 ] as const;
 
@@ -60,7 +63,7 @@ export const OWNER_ONLY: readonly Permission[] = ["roles.manage"];
 
 const CAMPAIGN_DEFAULTS: readonly Permission[] = [
   "campaigns.view", "campaigns.manage", "campaigns.send", "contacts.view", "contacts.manage",
-  "templates.view", "templates.manage", "reports.view",
+  "templates.view", "templates.manage", "reports.view", "inbox.view", "inbox.reply",
 ];
 
 export const DEFAULT_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
@@ -78,6 +81,8 @@ const IMPLIES: Partial<Record<Permission, Permission>> = {
   "campaigns.send": "campaigns.view",
   "contacts.manage": "contacts.view",
   "templates.manage": "templates.view",
+  "inbox.reply": "inbox.view",
+  "inbox.all": "inbox.view",
 };
 
 /** Keeps only known permissions a role may hold, and adds the "view" each "manage" depends on. */

@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  Activity, BarChart3, Ban, Building2, ClipboardCheck, CreditCard, Flag, Globe, History, Home, LayoutTemplate, LogOut, Menu,
-  AtSign, PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldCheck, UserCog, Users, UsersRound, X, type LucideIcon,
+  Activity, BarChart3, Ban, Building2, ChevronDown, ClipboardCheck, Clock, CreditCard, FileText, Flag, Globe, History, Home, LayoutTemplate, Layers, LogOut, Mail, MailOpen, Menu,
+  AtSign, Inbox, PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldAlert, ShieldCheck, Trash2, UserCog, Users, UsersRound, X, type LucideIcon,
 } from "lucide-react";
 import { Logo, LogoMark } from "@/components/ui/logo";
 import { BackContext } from "@/components/layout/back-button";
@@ -15,12 +15,222 @@ import { cn, initials } from "@/lib/utils";
 const icons: Record<string, LucideIcon> = {
   home: Home, send: Send, users: Users, template: LayoutTemplate, globe: Globe, chart: BarChart3, card: CreditCard,
   settings: Settings, shield: ShieldCheck, flag: Flag, ban: Ban, building: Building2, review: ClipboardCheck,
-  activity: Activity, history: History, team: UsersRound, at: AtSign, account: UserCog,
+  activity: Activity, history: History, team: UsersRound, at: AtSign, account: UserCog, inbox: Inbox,
+  mail: Mail, mailopen: MailOpen, file: FileText, clock: Clock, layers: Layers, junk: ShieldAlert, trash: Trash2,
 };
 
-export type ShellNavItem = { label: string; href: string; icon: keyof typeof icons };
+/** One entry inside a collapsible group (a mail folder). `key` is what the page's `folder` parameter holds. */
+export type ShellNavChild = { key: string; label: string; href: string; icon: keyof typeof icons; badge?: number };
+
+/**
+ * `badge` is a count shown beside the label (unread conversations). Zero or missing shows nothing.
+ * With `children` the item is a collapsible group: only the first `visibleChildren` entries show until "More" is pressed.
+ */
+export type ShellNavItem = { label: string; href: string; icon: keyof typeof icons; badge?: number; children?: ShellNavChild[]; visibleChildren?: number };
+
+/**
+ * Opens and closes a block of rows with a smooth height and fade, instead of snapping. The height animates from 0 to the content's
+ * own height (a 0fr to 1fr grid row), so it needs no measuring. While closed the rows are inert: hidden from keyboard and screen readers.
+ */
+function Collapse({ open, id, children }: { open: boolean; id?: string; children: React.ReactNode }) {
+  return (
+    <div
+      id={id}
+      className={cn(
+        "grid transition-[grid-template-rows,opacity] duration-300 ease-in-out motion-reduce:transition-none",
+        open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+      )}
+      {...(open ? {} : ({ inert: "", "aria-hidden": true } as object))}
+    >
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
+}
 
 const ITEM_PITCH = 44; // h-10 item + 4px gap
+
+/**
+ * The menu items, with the sliding highlight. A group (the mail folders) opens and closes in place, so the
+ * highlight follows the real position of the current row instead of a fixed step.
+ */
+function SidebarNav({
+  nav, compact, admin, activeIndex, activeChild, onNavigate,
+}: {
+  nav: ShellNavItem[];
+  compact: boolean;
+  admin: boolean;
+  activeIndex: number;
+  activeChild: string | null;
+  onNavigate: (href: string, child?: string) => void;
+}) {
+  const [open, setOpen] = useState<Record<string, boolean>>(() => Object.fromEntries(nav.map((item, i) => [item.href, Boolean(item.children?.length) && i === activeIndex])));
+  const [more, setMore] = useState<Record<string, boolean>>({});
+  const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
+  const [ready, setReady] = useState(false);
+  const rows = useRef(new Map<string, HTMLElement>());
+  const ref = (key: string) => (el: HTMLElement | null) => {
+    if (el) rows.current.set(key, el);
+    else rows.current.delete(key);
+  };
+
+  const current = nav[activeIndex];
+  const grouped = Boolean(current?.children?.length) && !compact;
+  const childIndex = grouped ? current.children!.findIndex((c) => c.key === activeChild) : -1;
+  const shown = current?.visibleChildren ?? 3;
+
+  // Arriving in a group opens it, and a current entry that is folded away under "More" opens that too.
+  useEffect(() => {
+    if (grouped) setOpen((o) => (o[current.href] ? o : { ...o, [current.href]: true }));
+  }, [grouped, current?.href]);
+  useEffect(() => {
+    if (grouped && childIndex >= shown) setMore((m) => (m[current.href] ? m : { ...m, [current.href]: true }));
+  }, [grouped, childIndex, shown, current?.href]);
+
+  const childVisible = grouped && open[current.href] && childIndex >= 0 && (childIndex < shown || more[current.href]);
+  const targetKey = activeIndex < 0 ? null : childVisible ? `${current.href}#${activeChild}` : current.href;
+  const layoutSig = JSON.stringify([open, more]);
+
+  // The highlight is measured now, and again on every frame while a group opens or closes, so it follows the rows as they glide.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = targetKey ? rows.current.get(targetKey) : null;
+      setPill((prev) => {
+        if (!el) return prev === null ? prev : null;
+        return prev && prev.top === el.offsetTop && prev.height === el.offsetHeight ? prev : { top: el.offsetTop, height: el.offsetHeight };
+      });
+    };
+    measure();
+    const started = performance.now();
+    let frame = requestAnimationFrame(function tick() {
+      measure();
+      if (performance.now() - started < 450) frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [targetKey, layoutSig, compact, nav]);
+  // The highlight only glides once it has a place to glide from, so it never swoops in on first load.
+  useEffect(() => {
+    if (!pill) return;
+    const id = requestAnimationFrame(() => setReady(true));
+    return () => cancelAnimationFrame(id);
+  }, [pill]);
+
+  const linkClass = (active: boolean, child = false) =>
+    cn(
+      "group relative flex items-center rounded-xl text-sm font-semibold transition-colors",
+      child ? "h-9 gap-3 pl-[2.6rem] pr-3" : cn("h-10", compact ? "justify-center px-0" : "gap-3 px-3"),
+      admin
+        ? active ? "text-white" : "text-white/70 hover:bg-white/10 hover:text-white"
+        : active ? "text-brand-800" : "text-ink-soft hover:bg-mist-100 hover:text-ink",
+    );
+  const badgeClass = "ml-auto rounded-full bg-brand-700 px-2 py-0.5 text-xs font-bold leading-none text-white";
+
+  return (
+    <div className="relative space-y-1">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute inset-x-0 top-0 rounded-xl",
+          ready && "transition-all duration-300 ease-out",
+          admin ? "bg-white/10" : "bg-brand-50",
+          activeIndex < 0 && "opacity-0",
+        )}
+        style={{ height: pill?.height ?? 40, transform: `translateY(${pill?.top ?? Math.max(activeIndex, 0) * ITEM_PITCH}px)` }}
+      >
+        <span className={cn("absolute inset-y-2 left-0 w-1 rounded-full", admin ? "bg-accent-400" : "bg-brand-700")} />
+      </span>
+
+      {nav.map((item, i) => {
+        const Icon = icons[item.icon];
+        const active = i === activeIndex;
+
+        if (item.children?.length && !compact) {
+          const isOpen = Boolean(open[item.href]);
+          const all = item.children;
+          const limit = item.visibleChildren ?? 3;
+          const showAll = Boolean(more[item.href]);
+          const menuId = `menu-${item.icon}-${i}`;
+          const renderChild = (child: ShellNavChild) => {
+            const ChildIcon = icons[child.icon];
+            const childActive = active && child.key === activeChild;
+            return (
+              <Link
+                key={child.key}
+                href={child.href}
+                ref={ref(`${item.href}#${child.key}`)}
+                onClick={() => onNavigate(child.href, child.key)}
+                aria-current={childActive ? "page" : undefined}
+                className={linkClass(childActive, true)}
+              >
+                <ChildIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{child.label}</span>
+                {child.badge ? <span className={badgeClass} aria-label={`${child.badge} ${child.key === "drafts" ? "drafts" : "unread"}`}>{child.badge > 99 ? "99+" : child.badge}</span> : null}
+              </Link>
+            );
+          };
+          return (
+            <div key={item.href}>
+              <button
+                type="button"
+                ref={ref(item.href)}
+                aria-expanded={isOpen}
+                aria-controls={menuId}
+                onClick={() => setOpen((o) => ({ ...o, [item.href]: !isOpen }))}
+                className={cn(linkClass(active), "w-full")}
+              >
+                <Icon className="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110" aria-hidden="true" />
+                <span className="truncate">{item.label}</span>
+                {!isOpen && item.badge ? <span className={badgeClass} aria-label={`${item.badge} unread`}>{item.badge > 99 ? "99+" : item.badge}</span> : null}
+                <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform duration-200", isOpen ? "rotate-180" : "", isOpen || !item.badge ? "ml-auto" : "")} aria-hidden="true" />
+              </button>
+              <Collapse open={isOpen} id={menuId}>
+                <div className="mt-1">
+                  <div className="space-y-1">{all.slice(0, limit).map(renderChild)}</div>
+                  {all.length > limit ? (
+                    <>
+                      {/* The folders folded under "More" glide open and shut. */}
+                      <Collapse open={showAll}>
+                        <div className="space-y-1 pt-1">{all.slice(limit).map(renderChild)}</div>
+                      </Collapse>
+                      <button
+                        type="button"
+                        onClick={() => setMore((m) => ({ ...m, [item.href]: !showAll }))}
+                        aria-expanded={showAll}
+                        className={cn("mt-1 flex h-8 w-full items-center gap-3 rounded-xl pl-[2.6rem] pr-3 text-xs font-semibold transition-colors", admin ? "text-white/60 hover:text-white" : "text-ink-muted hover:text-ink")}
+                      >
+                        <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform duration-300", showAll && "rotate-180")} aria-hidden="true" />
+                        {showAll ? "Less" : "More"}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </Collapse>
+            </div>
+          );
+        }
+
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            ref={ref(item.href)}
+            onClick={() => onNavigate(item.href)}
+            aria-current={active ? "page" : undefined}
+            aria-label={compact ? item.label : undefined}
+            title={compact ? item.label : undefined}
+            className={linkClass(active)}
+          >
+            <span className="relative flex shrink-0">
+              <Icon className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" aria-hidden="true" />
+              {compact && item.badge ? <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-brand-700 ring-2 ring-white" aria-hidden="true" /> : null}
+            </span>
+            {compact ? null : <span className="truncate">{item.label}</span>}
+            {!compact && item.badge ? <span className={badgeClass} aria-label={`${item.badge} unread`}>{item.badge > 99 ? "99+" : item.badge}</span> : null}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
 
 export function AppShell({
   nav,
@@ -52,6 +262,9 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   // The highlight jumps to the clicked item at once, rather than waiting for the next page to arrive.
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [pendingChild, setPendingChild] = useState<string | null>(null);
+  const search = useSearchParams();
+  const searchKey = search?.toString() ?? "";
   const admin = area === "admin";
 
   // The admin console is served from its own host, so its public paths have no /admin prefix.
@@ -59,8 +272,15 @@ export function AppShell({
   const root = nav[0]?.href;
   const target = pendingHref ?? pathname;
   const activeIndex = nav.findIndex((item) => (item.href === root ? target === root : target.startsWith(item.href)));
+  // Inside a group (the mail folders) the folder in the address says which entry is current.
+  const activeChild = (() => {
+    const item = nav[activeIndex];
+    if (!item?.children?.length) return null;
+    if (pendingChild) return pendingChild;
+    return pendingHref ? null : search?.get("folder") ?? item.children[0].key;
+  })();
 
-  useEffect(() => setPendingHref(null), [pathname]);
+  useEffect(() => { setPendingHref(null); setPendingChild(null); }, [pathname, searchKey]);
 
   // Back link: a page inside a section (a campaign, the import page) goes back to that section's
   // list. A section's own page (Campaigns, Contacts…) and the home page have none: they are reached
@@ -126,46 +346,18 @@ export function AppShell({
         ) : null}
 
         <nav className={cn("flex-1 px-3 py-2", compact ? "overflow-visible" : "overflow-y-auto")} aria-label={admin ? "Admin" : "Dashboard"}>
-          <div className="relative space-y-1">
-            <span
-              aria-hidden="true"
-              className={cn(
-                "absolute inset-x-0 top-0 h-10 rounded-xl transition-all duration-300 ease-out",
-                admin ? "bg-white/10" : "bg-brand-50",
-                activeIndex < 0 && "opacity-0",
-              )}
-              style={{ transform: `translateY(${Math.max(activeIndex, 0) * ITEM_PITCH}px)` }}
-            >
-              <span className={cn("absolute inset-y-2 left-0 w-1 rounded-full", admin ? "bg-accent-400" : "bg-brand-700")} />
-            </span>
-            {nav.map((item, i) => {
-              const Icon = icons[item.icon];
-              const active = i === activeIndex;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => {
-                    setOpen(false);
-                    setPendingHref(item.href);
-                  }}
-                  aria-current={active ? "page" : undefined}
-                  aria-label={compact ? item.label : undefined}
-                  title={compact ? item.label : undefined}
-                  className={cn(
-                    "group relative flex h-10 items-center rounded-xl text-sm font-semibold transition-colors",
-                    compact ? "justify-center px-0" : "gap-3 px-3",
-                    admin
-                      ? active ? "text-white" : "text-white/70 hover:bg-white/10 hover:text-white"
-                      : active ? "text-brand-800" : "text-ink-soft hover:bg-mist-100 hover:text-ink",
-                  )}
-                >
-                  <Icon className="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110" aria-hidden="true" />
-                  {compact ? null : <span className="truncate">{item.label}</span>}
-                </Link>
-              );
-            })}
-          </div>
+          <SidebarNav
+            nav={nav}
+            compact={compact}
+            admin={admin}
+            activeIndex={activeIndex}
+            activeChild={activeChild}
+            onNavigate={(href, child) => {
+              setOpen(false);
+              setPendingHref(href);
+              setPendingChild(child ?? null);
+            }}
+          />
         </nav>
 
         <div className={cn("border-t p-4", admin ? "border-white/10" : "border-mist", compact && "px-2")}>

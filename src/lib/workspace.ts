@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getAuthUser, getSessionUser } from "@/lib/auth/session";
+import { getAuthUser, getCookieUserId, getSessionUser } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createAdminClient, type Db } from "@/lib/supabase/admin";
 import { go } from "@/lib/flash";
@@ -55,6 +55,14 @@ export type ScopeCtx = { workspace: Workspace | null; db: Db | null; access: Acc
 /** The organization a person last switched to. Always re-checked against their memberships. */
 export const ACTIVE_WORKSPACE_COOKIE = "sv_ws";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A signed-in person with no workspace (the service key is missing): pages show their own empty states. */
+async function bareContext(): Promise<Ctx | null> {
+  const user = await getSessionUser();
+  return user ? { user, workspace: null, db: null, access: null, memberships: [] } : null;
+}
+
 const isRole = (v: unknown): v is MemberRole => typeof v === "string" && (ROLES as readonly string[]).includes(v);
 
 /**
@@ -65,43 +73,78 @@ const isRole = (v: unknown): v is MemberRole => typeof v === "string" && (ROLES 
  * they last switched to is used; otherwise the one they joined most recently.
  */
 export const getContext = cache(async (): Promise<Ctx | null> => {
-  const authUser = await getAuthUser(); // verified once per request, shared with the layout
-  if (!authUser) return null;
-  const bare = async (): Promise<Ctx | null> => {
-    const user = await getSessionUser();
-    return user ? { user, workspace: null, db: null, access: null, memberships: [] } : null;
-  };
-  if (!isSupabaseConfigured) return bare();
+  if (!isSupabaseConfigured) {
+    const authUser = await getAuthUser();
+    return authUser ? bareContext() : null;
+  }
 
-  let db: Db;
+  let db: Db | null = null;
   try {
     db = createAdminClient();
   } catch {
-    return bare();
+    db = null;
   }
 
-  // The profile and the memberships do not depend on each other, so they load in parallel.
-  const [user, { data }] = await Promise.all([
-    getSessionUser(),
-    db.from("workspace_members").select("role, created_at, workspaces(*)").eq("user_id", authUser.id).eq("status", "active").order("created_at", { ascending: false }),
-  ]);
-  if (!user) return null;
+  // Verifying the user with the Auth server is the slowest step, so the queries below start at the same time,
+  // keyed by the id in the session cookie (read locally). Their results are used ONLY if the Auth server then
+  // confirms that very id; otherwise they are thrown away and loaded again for the verified id.
+  const hintId = db ? await getCookieUserId() : null;
+  const verifying = getAuthUser();
+
+  const wanted = cookies().get(ACTIVE_WORKSPACE_COOKIE)?.value;
+  const wantedId = wanted && UUID_RE.test(wanted) ? wanted : null;
+
+  // One round trip for everything: the profile, the memberships, and (for the workspace the person last used)
+  // that workspace's role overrides and their departments.
+  const loadAll = (userId: string) =>
+    Promise.all([
+      db!.from("profiles").select("full_name, role").eq("id", userId).maybeSingle(),
+      db!.from("workspace_members").select("role, created_at, workspaces(*)").eq("user_id", userId).eq("status", "active").order("created_at", { ascending: false }),
+      wantedId ? db!.from("role_permissions").select("role, permissions").eq("workspace_id", wantedId) : Promise.resolve({ data: null }),
+      wantedId ? db!.from("department_members").select("department_id").eq("workspace_id", wantedId).eq("user_id", userId) : Promise.resolve({ data: null }),
+    ]);
+
+  const guess = db && hintId ? loadAll(hintId) : null;
+  guess?.catch(() => {}); // a failed guess is simply not used (and must not become an unhandled rejection)
+
+  const authUser = await verifying;
+  if (!authUser) return null;
+  if (!db) return bareContext();
+
+  const [{ data: profile }, { data }, { data: allOverrides }, { data: wantedDepts }] = await (guess && hintId === authUser.id ? guess.catch(() => loadAll(authUser.id)) : loadAll(authUser.id));
+
+  const user: SessionUser = {
+    id: authUser.id,
+    email: authUser.email ?? "",
+    fullName: (profile as { full_name?: string } | null)?.full_name ?? (authUser.user_metadata?.full_name as string | undefined) ?? "",
+    role: (profile as { role?: string } | null)?.role === "admin" ? "admin" : "user",
+  };
 
   type Row = { role: string; workspaces: Workspace | null };
   const rows = ((data ?? []) as unknown as Row[]).filter((r) => r.workspaces && isRole(r.role));
   const memberships: Membership[] = rows.map((r) => ({ id: r.workspaces!.id, name: r.workspaces!.name, role: r.role as MemberRole }));
   if (rows.length === 0) return { user, workspace: null, db, access: null, memberships };
 
-  const wanted = cookies().get(ACTIVE_WORKSPACE_COOKIE)?.value;
-  const chosen = rows.find((r) => r.workspaces!.id === wanted) ?? rows[0];
+  const chosen = rows.find((r) => r.workspaces!.id === wantedId) ?? rows[0];
   const workspace = chosen.workspaces as Workspace;
   const role = chosen.role as MemberRole;
 
-  const [{ data: override }, { data: depts }] = await Promise.all([
-    role === "owner" ? Promise.resolve({ data: null }) : db.from("role_permissions").select("permissions").eq("workspace_id", workspace.id).eq("role", role).maybeSingle(),
-    db.from("department_members").select("department_id").eq("workspace_id", workspace.id).eq("user_id", user.id),
-  ]);
-  const access = buildAccess(role, (override as { permissions?: unknown } | null)?.permissions ?? null, ((depts ?? []) as { department_id: string }[]).map((d) => d.department_id));
+  let override: unknown = null;
+  let deptRows: { department_id: string }[];
+  if (workspace.id === wantedId) {
+    // The speculative queries were for this very workspace: nothing more to fetch.
+    override = role === "owner" ? null : ((allOverrides ?? []) as { role: string; permissions: unknown }[]).find((o) => o.role === role)?.permissions ?? null;
+    deptRows = (wantedDepts ?? []) as { department_id: string }[];
+  } else {
+    // No (or an outdated) workspace cookie: the person's default workspace needs one more round trip.
+    const [{ data: o }, { data: d }] = await Promise.all([
+      role === "owner" ? Promise.resolve({ data: null }) : db.from("role_permissions").select("permissions").eq("workspace_id", workspace.id).eq("role", role).maybeSingle(),
+      db.from("department_members").select("department_id").eq("workspace_id", workspace.id).eq("user_id", user.id),
+    ]);
+    override = (o as { permissions?: unknown } | null)?.permissions ?? null;
+    deptRows = (d ?? []) as { department_id: string }[];
+  }
+  const access = buildAccess(role, override, deptRows.map((d) => d.department_id));
   return { user, workspace, db, access, memberships };
 });
 

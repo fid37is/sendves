@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 @layer base {
+  /* The two font families (loaded in app/layout.tsx). Tailwind's font-sans and font-display read these. */
+  :root {
+    --font-sans: "Plus Jakarta Sans Variable";
+    --font-display: "Bricolage Grotesque Variable";
+  }
   /* Edge/IE draw their own reveal button on password fields; ours replaces it. */
   input::-ms-reveal,
   input::-ms-clear {

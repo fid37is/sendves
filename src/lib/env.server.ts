@@ -32,6 +32,19 @@ export const serverEnv = {
     /** Optional but recommended: only accept SNS messages from this topic. */
     snsTopicArn: process.env.SES_SNS_TOPIC_ARN ?? "",
   },
+  /**
+   * Replies. Every email carries a Reply-To on this domain, which Sendves owns (e.g. reply.sendves.com), so a
+   * customer's own mailboxes are never touched. Leave INBOUND_DOMAIN empty to turn the inbox's receiving side off:
+   * emails then go out without a Reply-To and replies land wherever they did before.
+   */
+  inbound: {
+    domain: (process.env.INBOUND_DOMAIN ?? "").trim().toLowerCase().replace(/^@/, ""),
+    webhookSecret: process.env.INBOUND_WEBHOOK_SECRET ?? "",
+    /** Optional but recommended: only accept messages from this SNS topic. */
+    snsTopicArn: process.env.INBOUND_SNS_TOPIC_ARN ?? "",
+    /** The S3 bucket SES stores received mail in. Mail is only read from this bucket. */
+    s3Bucket: process.env.INBOUND_S3_BUCKET ?? "",
+  },
   admin: {
     /** Admins must pass a second factor (TOTP). Set ADMIN_REQUIRE_MFA=false only for local development. */
     requireMfa: process.env.ADMIN_REQUIRE_MFA !== "false",

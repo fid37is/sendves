@@ -3,6 +3,7 @@ import { applyConditions, fillCountdown, UNSUBSCRIBE_TOKEN } from "@/lib/email/c
 import { emailTheme } from "@/config/brand";
 import { serverEnv } from "@/lib/env.server";
 import { clickSig, openSig, unsubscribeToken } from "@/lib/tokens";
+import { replyAddress } from "@/server/inbox/address";
 import type { VariableDef } from "@/lib/email/variables";
 import type { OutboundEmail } from "./providers/types";
 
@@ -11,6 +12,8 @@ type WorkspaceInput = { name: string; business_address: string | null; track_ope
 type ContactInput = { first_name: string | null; last_name: string | null; email: string; custom_fields?: Record<string, unknown> | null };
 
 const UNSUB_SENTINEL = "\u0001";
+/** The designer's footer holds this comment where the unsubscribe line goes (see renderEmailHtml in lib/email/design.ts). */
+const UNSUB_MARKER = "<!--UNSUB-->";
 
 function htmlToText(html: string): string {
   return html
@@ -66,7 +69,19 @@ export function buildEmail(args: {
   if (sendId) html = rewriteLinks(html, sendId);
   html = html.split(UNSUB_SENTINEL).join(unsubUrl);
 
-  const footer = hasUnsubscribeBlock
+  // A designed email carries the marker instead: it becomes the real unsubscribe link and the business
+  // address, exactly where the designer put it. Nothing is appended after </html> in that case.
+  const hasMarker = html.includes(UNSUB_MARKER);
+  if (hasMarker) {
+    const address = (workspace.business_address ?? "").trim();
+    html = html.split(UNSUB_MARKER).join(
+      `<a href="${unsubUrl}" style="color:inherit;text-decoration:underline;">Unsubscribe</a>${address ? `<br>${escapeHtml(address)}` : ""}`,
+    );
+  }
+
+  const footer = hasMarker
+    ? ""
+    : hasUnsubscribeBlock
     ? `<p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:${emailTheme.muted};text-align:center;">${escapeHtml(workspace.business_address ?? "")}</p>`
     : `<p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:${emailTheme.muted};text-align:center;">` +
       `You are receiving this email because you subscribed to ${escapeHtml(workspace.name)}.<br>` +
@@ -77,7 +92,14 @@ export function buildEmail(args: {
       ? `<img src="${base}/api/track/open?s=${sendId}&g=${openSig(sendId)}" width="1" height="1" alt="" style="display:block;border:0;">`
       : "";
 
-  html = html.includes("<!--FOOTER-->") ? html.replace("<!--FOOTER-->", footer + pixel) : html + footer + pixel;
+  // The footer and the open pixel belong inside the page, not after </html>.
+  const tail = footer + pixel;
+  const closeAt = html.toLowerCase().lastIndexOf("</body>");
+  html = html.includes("<!--FOOTER-->")
+    ? html.replace("<!--FOOTER-->", tail)
+    : closeAt >= 0
+      ? html.slice(0, closeAt) + tail + html.slice(closeAt)
+      : html + tail;
 
   const fromName = campaign.from_name.replace(/["<>\r\n]/g, "").trim();
   return {
@@ -90,6 +112,8 @@ export function buildEmail(args: {
       "List-Unsubscribe": `<${oneClickUrl}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
+    // Replies to a campaign email arrive in the inbox. Test emails (no sendId) keep their plain From address.
+    replyTo: sendId ? replyAddress("s", sendId, fromName) : undefined,
     tags: sendId ? { send_id: sendId } : undefined,
   };
 }
