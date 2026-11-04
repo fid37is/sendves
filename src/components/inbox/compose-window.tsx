@@ -77,9 +77,10 @@ export function ComposeButton({ className }: { className?: string }) {
   const compose = useCompose();
   if (!compose) return null;
   return (
-    <Button onClick={() => compose.open()} className={className}>
-      <PenSquare className="h-4 w-4" aria-hidden="true" />
-      Compose
+    // On a phone it is just the icon (a round button the height of the search bar); from "sm" up it shows the word too.
+    <Button onClick={() => compose.open()} aria-label="Compose" title="Compose" className={cn("!h-12 !w-12 !gap-0 !px-0 sm:!h-11 sm:!w-auto sm:!gap-2 sm:!px-6", className)}>
+      <PenSquare className="h-5 w-5 sm:h-4 sm:w-4" aria-hidden="true" />
+      <span className="hidden sm:inline">Compose</span>
     </Button>
   );
 }

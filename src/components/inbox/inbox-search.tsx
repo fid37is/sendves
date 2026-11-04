@@ -33,7 +33,7 @@ export function InboxSearch({
   }, [open]);
 
   return (
-    <form ref={box} action="/app/inbox" method="get" role="search" className="relative min-w-0 flex-1">
+    <form ref={box} action="/app/inbox" method="get" role="search" className="min-w-0 flex-1 sm:relative">
       {folder !== "inbox" ? <input type="hidden" name="folder" value={folder} /> : null}
       {size ? <input type="hidden" name="size" value={size} /> : null}
       <div className="flex h-12 items-center gap-2 rounded-full bg-mist-100 pl-4 pr-2 transition-shadow focus-within:bg-white focus-within:shadow-md focus-within:ring-1 focus-within:ring-mist">
@@ -53,33 +53,33 @@ export function InboxSearch({
         </button>
       </div>
 
-      <div id={`${uid}-filters`} className={cn("absolute inset-x-0 top-full z-20 mt-2 rounded-2xl border border-mist bg-white p-4 shadow-xl sm:left-auto sm:w-[26rem]", !open && "hidden")}>
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div id={`${uid}-filters`} className={cn("absolute inset-x-0 top-full z-20 mt-2 rounded-2xl border border-mist bg-white p-5 shadow-xl sm:left-auto sm:w-[26rem] sm:p-6", !open && "hidden")}>
+        <div className="grid gap-5 sm:grid-cols-2">
           <div>
-            <label htmlFor={`${uid}-status`} className="mb-1.5 block text-sm font-semibold text-ink">Status</label>
-            <Select id={`${uid}-status`} name="status" defaultValue={status} className="h-10">
+            <label htmlFor={`${uid}-status`} className="mb-2 block text-sm font-semibold text-ink">Status</label>
+            <Select id={`${uid}-status`} name="status" defaultValue={status} className="h-11">
               {STATUS_FILTERS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </Select>
           </div>
           <div>
-            <label htmlFor={`${uid}-within`} className="mb-1.5 block text-sm font-semibold text-ink">Date</label>
-            <Select id={`${uid}-within`} name="within" defaultValue={within} className="h-10">
+            <label htmlFor={`${uid}-within`} className="mb-2 block text-sm font-semibold text-ink">Date</label>
+            <Select id={`${uid}-within`} name="within" defaultValue={within} className="h-11">
               {WITHIN_FILTERS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </Select>
           </div>
         </div>
         {canSeeAll ? (
-          <label className="mt-4 flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" name="mine" value="1" defaultChecked={mine} className="h-4 w-4 rounded border-mist text-brand-700 focus:ring-brand-500" />
+          <label className="mt-5 flex items-start gap-3 text-sm leading-snug text-ink">
+            <input type="checkbox" name="mine" value="1" defaultChecked={mine} className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded accent-brand-700 focus:ring-brand-500" />
             Only conversations that are mine or assigned to me
           </label>
         ) : null}
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-mist pt-3">
-          <Link href={resetHref} className={buttonStyles({ variant: "outline", size: "sm" })} onClick={() => setOpen(false)}>
+        <div className="mt-5 grid grid-cols-2 gap-3 border-t border-mist pt-5 sm:flex sm:items-center sm:justify-end">
+          <Link href={resetHref} className={buttonStyles({ variant: "outline", size: "md", className: "whitespace-nowrap" })} onClick={() => setOpen(false)}>
             <X className="h-4 w-4" aria-hidden="true" />
             Clear all
           </Link>
-          <Button type="submit" size="sm">Search</Button>
+          <Button type="submit" size="md">Search</Button>
         </div>
       </div>
     </form>
