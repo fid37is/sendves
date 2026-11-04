@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { Check } from "lucide-react";
 import { PageIntro, Section } from "@/components/marketing/section";
 import { CtaBand } from "@/components/marketing/landing-sections";
 
-export const metadata: Metadata = { title: "Features", description: "Everything Sendves includes for sending email campaigns." };
+export const metadata = pageMetadata({ title: "Features", description: "Everything Sendves includes for sending email campaigns.", path: "/features" });
 
 const groups = [
   {
@@ -17,6 +17,12 @@ const groups = [
     title: "Contacts and segments",
     text: "Keep your audience tidy and send to the right people.",
     points: ["CSV import with field mapping and duplicate removal", "Lists, tags and custom fields", "Clear statuses: subscribed, unsubscribed, bounced, complained", "Export your contacts any time", "Rule-based segments on paid plans"],
+  },
+  {
+    id: "businesses",
+    title: "Several businesses, one account",
+    text: "Send for more than one company without mixing their identity or their audience.",
+    points: ["Each business has its own logo, brand colour and footer address", "Each business has its own sending domains and sender addresses", "Contacts, lists and unsubscribes stay separate per business", "Switch between businesses from the sidebar", "One login and one subscription covers them all"],
   },
   {
     id: "deliverability",

@@ -12,6 +12,7 @@ export async function startCheckoutAction(formData: FormData) {
   const plan = String(formData.get("plan") ?? "");
   const provider = String(formData.get("provider") ?? "");
 
+  if (ctx.workspace.account_workspace_id) go(BACK, "info", "This business is covered by the plan on your main business. Switch to your main business to change the plan.");
   if (plan !== "starter" && plan !== "growth") go(BACK, "err", "Choose a plan to continue.");
   if (provider !== "stripe" && provider !== "paystack") go(BACK, "err", "Choose a payment method.");
   if (!billingEnabled[provider]()) go(BACK, "err", "That payment method isn’t available yet. Contact support to change your plan.");

@@ -90,9 +90,24 @@ export async function applyPlan(db: Db, workspaceId: string, plan: PlanId, provi
     billing_provider: provider,
     billing_ref: ref,
   }).eq("id", workspaceId);
+  await syncBusinesses(db, workspaceId, plan);
+}
+
+/** The businesses added under a main business share its subscription: they move to the same plan and limits. */
+async function syncBusinesses(db: Db, mainId: string, plan: PlanId) {
+  const limits = limitsFor(plan);
+  const { data: rows } = await db.from("workspaces").select("id, daily_send_limit").eq("account_workspace_id", mainId);
+  await Promise.all((rows ?? []).map((r: { id: string; daily_send_limit: number }) =>
+    db.from("workspaces").update({
+      plan,
+      max_contacts: limits.contacts,
+      daily_send_limit: plan === "free" ? limits.startDaily : Math.max(r.daily_send_limit, limits.startDaily),
+    }).eq("id", r.id),
+  ));
 }
 
 export async function downgradeToFree(db: Db, workspaceId: string) {
   const limits = limitsFor("free");
   await db.from("workspaces").update({ plan: "free", max_contacts: limits.contacts, daily_send_limit: limits.startDaily, billing_ref: null }).eq("id", workspaceId);
+  await syncBusinesses(db, workspaceId, "free");
 }

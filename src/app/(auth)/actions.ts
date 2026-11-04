@@ -45,7 +45,8 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
     options: {
       // Creating the account is the acceptance. The timestamp is kept as proof of when.
       data: { full_name: fullName, terms_accepted_at: new Date().toISOString() },
-      emailRedirectTo: `${env.siteUrl}/auth/callback?next=/app`,
+      // No query string: Supabase only honours redirect URLs that match its allow-list exactly, and the callback defaults to /app.
+      emailRedirectTo: `${env.siteUrl}/auth/callback`,
     },
   });
 

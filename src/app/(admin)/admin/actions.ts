@@ -144,9 +144,17 @@ export async function savePlatformSettingsAction(formData: FormData) {
     return settingsDone("err", "That request was invalid. Reload the page and try again.");
   }
 
+  const { data: before } = await db.from("platform_settings").select("*").eq("id", 1).maybeSingle();
   const { error } = await db.from("platform_settings").upsert({ id: 1, ...next });
   if (error) return settingsDone("err", `Couldn’t save the settings: ${error.message}`);
-  await recordAudit(db, user, `settings.${section}`, { type: "platform_settings", id: "1" }, next);
+
+  // The audit entry records only what changed (old → new), and nothing at all for a save that changed nothing.
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  for (const [key, to] of Object.entries(next)) {
+    const from = (before as Record<string, unknown> | null)?.[key];
+    if (JSON.stringify(from ?? null) !== JSON.stringify(to)) changes[key] = { from: from ?? null, to };
+  }
+  if (Object.keys(changes).length) await recordAudit(db, user, `settings.${section}`, { type: "platform_settings", id: "1" }, { changes });
   revalidatePath("/admin", "layout");
   return settingsDone("ok", section === "enforcement" ? "Enforcement settings saved. The worker uses them from its next pass." : "Sign-up settings saved.");
 }

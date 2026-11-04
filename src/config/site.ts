@@ -7,7 +7,7 @@ export const siteConfig = {
   name: "Sendves",
   tagline: "Your campaigns, on course.",
   description:
-    "Sendves is a focused email campaign platform. Verify your domain, import your contacts and send campaigns with unsubscribe, bounce and compliance handling built in.",
+    "Sendves is an email campaign platform with deliverability built in. Verify your domain, import contacts and send with unsubscribe and bounce handling.",
   url: env.siteUrl,
   supportEmail: env.supportEmail,
   /** Shows a “draft” notice on legal pages until a lawyer has reviewed them. */

@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { PageIntro, Section } from "@/components/marketing/section";
 import { siteConfig } from "@/config/site";
 import { ContactForm } from "./contact-form";
 
-export const metadata: Metadata = { title: "Contact us", description: "Get in touch with the Sendves team." };
+export const metadata = pageMetadata({ title: "Contact us", description: "Get in touch with the Sendves team.", path: "/contact" });
 
 export default function ContactPage() {
   return (

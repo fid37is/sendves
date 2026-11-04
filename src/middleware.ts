@@ -95,6 +95,16 @@ export async function middleware(request: NextRequest) {
   // On every other host the admin console does not exist.
   if (pathname === "/admin" || pathname.startsWith("/admin/")) return notFound(request);
 
+  // If Supabase could not use our redirect URL it falls back to the Site URL (the landing page) and appends the
+  // auth code there. Forward those links to the callback instead of showing the landing page.
+  const { searchParams } = request.nextUrl;
+  if (pathname === "/" && (searchParams.has("code") || searchParams.has("token_hash"))) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/callback";
+    if (!url.searchParams.has("next")) url.searchParams.set("next", "/app");
+    return NextResponse.redirect(url);
+  }
+
   const isProtected = pathname.startsWith("/app");
   const isAuthPage = AUTH_PAGES.includes(pathname);
 

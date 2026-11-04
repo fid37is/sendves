@@ -8,6 +8,7 @@ import { canAccessDepartment, CAMPAIGN_ROLES, DEFAULT_PERMISSIONS, sanitizePermi
 import { inScope } from "@/server/scope";
 import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 import { requireAdminDb } from "@/lib/auth/admin";
+import { auditDetails, auditTarget } from "@/lib/audit-format";
 import { dnsRecordsFor } from "@/server/sending/domains";
 import { limitsFor } from "@/config/plan-limits";
 import { getDailyActivity, getTopLinks, pct, ratio, sumDays, type RangeDays } from "@/lib/analytics";
@@ -833,8 +834,9 @@ export async function getAuditLog() {
   const { data } = await db.from("audit_log").select("id, actor_email, action, target_type, target_id, meta, ip, created_at").order("created_at", { ascending: false }).limit(200);
   return (data ?? []).map((a: any) => ({
     id: Number(a.id), actor: (a.actor_email as string) || "-", action: a.action as string,
-    target: [a.target_type, a.target_id].filter(Boolean).join(" ") || "-", ip: (a.ip as string) || "-",
-    detail: a.meta && Object.keys(a.meta).length ? JSON.stringify(a.meta) : "",
+    target: auditTarget(a.target_type as string | null, a.target_id as string | null),
+    ip: (a.ip as string) || "-",
+    details: auditDetails(a.meta),
     when: new Date(a.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
   }));
 }

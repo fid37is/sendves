@@ -243,6 +243,7 @@ export function AppShell({
   organizations,
   activeOrganizationId,
   switchOrganization,
+  addBusinessHref,
 }: {
   nav: ShellNavItem[];
   area: "app" | "admin";
@@ -256,6 +257,8 @@ export function AppShell({
   organizations?: { id: string; name: string }[];
   activeOrganizationId?: string;
   switchOrganization?: (formData: FormData) => Promise<void>;
+  /** Where "Add business" goes. Only passed to people who own a business. */
+  addBusinessHref?: string;
 }) {
   const rawPath = usePathname();
   const [open, setOpen] = useState(false);
@@ -361,9 +364,9 @@ export function AppShell({
         </nav>
 
         <div className={cn("border-t p-4", admin ? "border-white/10" : "border-mist", compact && "px-2")}>
-          {organizations && organizations.length > 1 && switchOrganization && !compact ? (
-            <form action={switchOrganization} className="mb-3">
-              <label htmlFor={`org-${compact ? "c" : "f"}`} className={cn("mb-1 block px-1 text-xs font-semibold", admin ? "text-white/60" : "text-ink-muted")}>Organization</label>
+          {!compact && organizations && organizations.length > 1 && switchOrganization ? (
+            <form action={switchOrganization} className={addBusinessHref ? "mb-1" : "mb-3"}>
+              <label htmlFor={`org-${compact ? "c" : "f"}`} className={cn("mb-1 block px-1 text-xs font-semibold", admin ? "text-white/60" : "text-ink-muted")}>Business</label>
               <select
                 id={`org-${compact ? "c" : "f"}`}
                 name="workspaceId"
@@ -374,6 +377,9 @@ export function AppShell({
                 {organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
             </form>
+          ) : null}
+          {!compact && addBusinessHref ? (
+            <a href={addBusinessHref} className={cn("mb-3 block rounded-xl px-3 py-2 text-sm font-semibold", admin ? "text-accent-300 hover:bg-white/10" : "text-brand-800 hover:bg-brand-50")}>+ Add business</a>
           ) : null}
           {switchLink && !compact ? (
             <a
