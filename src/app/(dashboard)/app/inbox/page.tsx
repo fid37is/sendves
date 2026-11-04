@@ -109,7 +109,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Search
   const showSetupNotice = !inboundEnabled() && can(ctx!.access, "org.settings");
 
   const bar = (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="relative flex flex-wrap items-center gap-3">
       <InboxSearch folder={folder} q={q} status={status} within={within} mine={mine} canSeeAll={canSeeAll} size={size === INBOX_PAGE ? null : size} resetHref={resetHref} />
       {canCompose ? <ComposeButton className="ml-auto shrink-0" /> : null}
     </div>
