@@ -32,3 +32,24 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     role: profile?.role === "admin" ? "admin" : "user",
   };
 });
+
+
+/**
+ * The user id from the session cookie, read locally with NO network call. It is only a HINT, used to start the
+ * workspace queries at the same time as the (slower) verification in getAuthUser. Nothing from those queries is
+ * ever used unless getAuthUser confirms the same id, so this never grants access on its own.
+ */
+export const getCookieUserId = cache(async (): Promise<string | null> => {
+  if (!isSupabaseConfigured) return null;
+  try {
+    const {
+      data: { session },
+    } = await createClient().auth.getSession();
+    const token = session?.access_token;
+    if (!token) return null;
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { sub?: unknown };
+    return typeof payload.sub === "string" ? payload.sub : null;
+  } catch {
+    return null;
+  }
+});

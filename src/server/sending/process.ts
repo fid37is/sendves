@@ -5,6 +5,8 @@ import { evaluateHealth, loadSettings, maybeRaiseLimit } from "@/server/abuse";
 import { checkSender, type SenderCheck } from "@/server/senders";
 import { getProvider, PermanentSendError, type MailProvider } from "./providers";
 import { buildEmail } from "./render";
+import { sentToday as sentTodayCount } from "@/server/inbox/outbound";
+import { sendDueEmails } from "@/server/inbox/scheduled";
 
 const MAX_ATTEMPTS = 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -86,8 +88,8 @@ async function processSend(db: Db, provider: MailProvider, send: Row, caches: Ca
   }
 
   // Daily limit: defer to the next UTC day instead of failing.
-  const sentToday = await cached(caches.sentToday, ws.id, async () =>
-    (await db.from("sends").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).gte("sent_at", startOfUtcDay().toISOString())).count ?? 0);
+  // Single emails written in the inbox count against the same limit.
+  const sentToday = await cached(caches.sentToday, ws.id, () => sentTodayCount(db, ws.id));
   if (sentToday >= ws.daily_send_limit) {
     const tomorrow = new Date(startOfUtcDay().getTime() + 24 * 3600 * 1000);
     await setSend(db, send.id, { status: "queued", run_at: tomorrow.toISOString(), attempts: Math.max(0, send.attempts - 1) });
@@ -143,6 +145,8 @@ export async function runTick(opts: { budgetMs?: number } = {}): Promise<{ activ
 
   await db.rpc("release_stuck_sends");
   const activated = await activateScheduled(db);
+  // Emails scheduled from the inbox that have come due. A problem here never stops campaigns from sending.
+  await sendDueEmails(db, Math.min(10000, budget / 2)).catch((err) => console.error("[inbox scheduled] pass failed:", (err as Error).message));
 
   const caches: Caches = { campaigns: new Map(), workspaces: new Map(), sentToday: new Map(), senders: new Map() };
   const delay = 1000 / serverEnv.sending.ratePerSecond;

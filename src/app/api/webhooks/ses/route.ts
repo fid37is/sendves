@@ -11,13 +11,40 @@ async function suppressGlobal(db: Db, email: string, reason: string) {
   await db.from("suppression_entries").insert({ workspace_id: null, email: email.toLowerCase(), reason });
 }
 
+/**
+ * Events for a single email written in the inbox. They matter as much as campaign ones: a hard bounce or a
+ * complaint suppresses the address everywhere, whichever way the email was sent.
+ */
+async function handleInboxEvent(db: Db, type: string, messageId: string, msg: any) {
+  const { data: m } = await db.from("inbox_messages").select("id, workspace_id, conversation_id, to_email, status").eq("provider_message_id", messageId).eq("direction", "outbound").maybeSingle();
+  if (!m) return;
+  const { data: conv } = await db.from("conversations").select("contact_id").eq("id", m.conversation_id).maybeSingle();
+  const contactId: string | null = conv?.contact_id ?? null;
+  const base = { workspace_id: m.workspace_id, contact_id: contactId, meta: { message_id: m.id } };
+
+  if (type === "Delivery") {
+    await db.from("inbox_messages").update({ status: "delivered" }).eq("id", m.id).eq("status", "sent");
+  } else if (type === "Bounce") {
+    if (msg.bounce?.bounceType !== "Permanent") return;
+    await db.from("inbox_messages").update({ status: "bounced" }).eq("id", m.id);
+    if (contactId) await db.from("contacts").update({ status: "bounced" }).eq("id", contactId);
+    await suppressGlobal(db, m.to_email, "Hard bounce");
+    await db.from("events").insert({ ...base, type: "bounce", meta: { ...base.meta, subType: msg.bounce?.bounceSubType ?? null } });
+  } else if (type === "Complaint") {
+    await db.from("inbox_messages").update({ status: "complained" }).eq("id", m.id);
+    if (contactId) await db.from("contacts").update({ status: "complained" }).eq("id", contactId);
+    await suppressGlobal(db, m.to_email, "Spam complaint");
+    await db.from("events").insert({ ...base, type: "complaint" });
+  }
+}
+
 async function handleEvent(db: Db, msg: any) {
   const type: string = msg.eventType ?? msg.notificationType ?? "";
   const messageId: string | undefined = msg.mail?.messageId;
   if (!messageId) return;
 
   const { data: send } = await db.from("sends").select("id, workspace_id, campaign_id, contact_id, email, status").eq("provider_message_id", messageId).maybeSingle();
-  if (!send) return;
+  if (!send) return handleInboxEvent(db, type, messageId, msg);
   const base = { workspace_id: send.workspace_id, campaign_id: send.campaign_id, send_id: send.id, contact_id: send.contact_id };
 
   if (type === "Delivery") {

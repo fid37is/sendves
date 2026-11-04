@@ -5,6 +5,7 @@ import {
   SendEmailCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2";
+import MailComposer from "nodemailer/lib/mail-composer";
 import { serverEnv } from "@/lib/env.server";
 import { PermanentSendError, type MailProvider } from "../types";
 
@@ -22,6 +23,23 @@ function ses(): SESv2Client {
   return client;
 }
 
+/** SES's simple format can't carry attachments, so those emails are sent as a complete MIME message. */
+function buildRaw(email: Parameters<MailProvider["send"]>[0]): Promise<Uint8Array> {
+  const mail = new MailComposer({
+    from: email.from,
+    to: [email.to, ...(email.alsoTo ?? [])],
+    cc: email.cc?.length ? email.cc : undefined,
+    bcc: email.bcc?.length ? email.bcc : undefined,
+    replyTo: email.replyTo,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+    headers: email.headers,
+    attachments: (email.attachments ?? []).map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType, contentDisposition: "attachment" as const })),
+  });
+  return new Promise((resolve, reject) => mail.compile().build((err, message) => (err ? reject(err) : resolve(new Uint8Array(message)))));
+}
+
 const PERMANENT = new Set(["MessageRejected", "BadRequestException", "InvalidParameterValue", "NotFoundException"]);
 
 export const sesProvider: MailProvider = {
@@ -29,13 +47,15 @@ export const sesProvider: MailProvider = {
 
   async send(email) {
     try {
+      const withFiles = (email.attachments?.length ?? 0) > 0;
       const res = await ses().send(
         new SendEmailCommand({
           FromEmailAddress: email.from,
-          Destination: { ToAddresses: [email.to] },
+          Destination: { ToAddresses: [email.to, ...(email.alsoTo ?? [])], CcAddresses: email.cc?.length ? email.cc : undefined, BccAddresses: email.bcc?.length ? email.bcc : undefined },
+          ReplyToAddresses: !withFiles && email.replyTo ? [email.replyTo] : undefined,
           ConfigurationSetName: serverEnv.aws.sesConfigurationSet || undefined,
           EmailTags: Object.entries(email.tags ?? {}).map(([Name, Value]) => ({ Name, Value })),
-          Content: {
+          Content: withFiles ? { Raw: { Data: await buildRaw(email) } } : {
             Simple: {
               Subject: { Data: email.subject, Charset: "UTF-8" },
               Body: { Html: { Data: email.html, Charset: "UTF-8" }, Text: { Data: email.text, Charset: "UTF-8" } },

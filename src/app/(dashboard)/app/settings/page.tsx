@@ -12,7 +12,7 @@ import { FOOTER_TEXT_MAX, isTimeZone, TIME_ZONES } from "@/lib/company";
 import { DEFAULT_BRAND_COLOR, DEFAULT_FOOTER_TEXT, EMPTY_LOGO } from "@/lib/email/campaign";
 import { getContext } from "@/lib/workspace";
 import { getEmailLogo } from "@/server/email-assets";
-import { updateBrandAction, updateCompanyAction, updateEmailDefaultsAction, updateProfileAction } from "./actions";
+import { updateBrandAction, updateCompanyAction, updateEmailDefaultsAction, updateNotificationsAction, updateProfileAction } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -32,6 +32,11 @@ export default async function SettingsPage() {
   const companySaved = Boolean(ws?.business_address);
   const brandSaved = Boolean(ws?.brand_color || logo.src);
   const emailSaved = Boolean(ws?.email_footer_text || (ws?.timezone && ws.timezone !== "UTC"));
+
+  // Whether replies to this person's conversations are emailed to them. Missing column (migration not run yet) counts as on.
+  const notify = can(ctx?.access, "inbox.view") && ctx?.db
+    ? ((await ctx.db.from("profiles").select("notify_inbox_replies").eq("id", ctx.user.id).maybeSingle()).data as { notify_inbox_replies?: boolean } | null)?.notify_inbox_replies !== false
+    : true;
 
   const zones: string[] = [...TIME_ZONES];
   if (ws?.timezone && !zones.includes(ws.timezone) && isTimeZone(ws.timezone)) zones.unshift(ws.timezone);
@@ -157,6 +162,21 @@ export default async function SettingsPage() {
               <FormActions><ActionButton requireChange mobileLabel="Update">Save profile</ActionButton></FormActions>
             </form>
           </Card>
+          {can(ctx?.access, "inbox.view") ? (
+            <Card className="mt-6">
+              <CardHeader title="Inbox emails" />
+              <form action={updateNotificationsAction} className="space-y-5 p-6">
+                <label className="flex items-start gap-3 text-sm text-ink">
+                  <input type="checkbox" name="notifyInboxReplies" defaultChecked={notify} className="mt-1 h-4 w-4 rounded border-mist accent-brand-700" />
+                  <span>
+                    <span className="block font-semibold">Email me when a contact replies</span>
+                    <span className="block text-ink-muted">For conversations that are yours or assigned to you. At most one email every 15 minutes for each conversation.</span>
+                  </span>
+                </label>
+                <FormActions><ActionButton requireChange mobileLabel="Update">Save</ActionButton></FormActions>
+              </form>
+            </Card>
+          ) : null}
         </SettingsSection>
       </SettingsLayout>
     </>

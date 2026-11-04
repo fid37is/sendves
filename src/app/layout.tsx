@@ -1,24 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
+// Fonts come from npm packages (self-hosted), not from Google at build time, so the build needs no internet access
+// and visitors' browsers never contact Google. They are variable fonts, so every weight is available.
+import "@fontsource-variable/plus-jakarta-sans";
+import "@fontsource-variable/bricolage-grotesque";
 import { siteConfig } from "@/config/site";
 import { Toaster } from "@/components/ui/toast";
 import { ConfirmProvider } from "@/components/ui/confirm";
 import { themeColor } from "@/config/brand";
 import "./globals.css";
-
-const sans = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-  variable: "--font-sans",
-  display: "swap",
-});
-
-/** Headlines and big numbers. A variable font, so every weight is available. */
-const display = Bricolage_Grotesque({
-  subsets: ["latin"],
-  variable: "--font-display",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
@@ -44,7 +33,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${display.variable}`}>
+    <html lang="en">
       <body className="min-h-screen bg-canvas font-sans text-ink antialiased">
         <ConfirmProvider>{children}</ConfirmProvider>
         <Toaster />

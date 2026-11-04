@@ -24,18 +24,23 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
   if (!can(ctx?.access, "contacts.view")) return <NoAccess title="Contacts" what="contacts" />;
   const manage = can(ctx?.access, "contacts.manage");
   const access = ctx!.access!;
-  const departments = (await getDepartments(ctx!)).filter((d) => access.allDepartments || access.departmentIds.includes(d.id)).map(({ id, name }) => ({ id, name }));
   const orgWideAllowed = access.allDepartments || access.departmentIds.length === 0;
   const page = Number(searchParams.page ?? 1) || 1;
 
-  const { lists, total: totalContacts } = await getListsOverview(ctx!);
+  // The three loads don't depend on each other, so they run together. The list filter is passed on as typed
+  // (getContacts ignores anything that is not a real list id); a list that doesn't exist is caught right after.
   const unassigned = searchParams.list === "none";
+  const [allDepartments, { lists, total: totalContacts }, { rows, total, pageSize }] = await Promise.all([
+    getDepartments(ctx!),
+    getListsOverview(ctx!),
+    getContacts(ctx!, { q: searchParams.q, status: searchParams.status, page, list: searchParams.list }),
+  ]);
+  const departments = allDepartments.filter((d) => access.allDepartments || access.departmentIds.includes(d.id)).map(({ id, name }) => ({ id, name }));
   const current = unassigned ? null : lists.find((l) => l.id === searchParams.list) ?? null;
   // A link to a list that was deleted: fall back to everyone instead of showing an empty page.
   if (searchParams.list && !unassigned && !current) redirect("/app/contacts");
   const listParam = current ? current.id : unassigned ? "none" : undefined;
 
-  const { rows, total, pageSize } = await getContacts(ctx!, { q: searchParams.q, status: searchParams.status, page, list: listParam });
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const qs = (p: number) =>
     `/app/contacts?page=${p}${listParam ? `&list=${listParam}` : ""}${searchParams.q ? `&q=${encodeURIComponent(searchParams.q)}` : ""}${searchParams.status ? `&status=${searchParams.status}` : ""}`;
@@ -91,7 +96,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Sea
             {current ? <ListSettingsButton list={current} signupUrl={`${siteConfig.url}/subscribe/${current.id}`} className="ml-auto" /> : null}
             </div>
 
-            <ContactsTable rows={rows} lists={lists} current={current ? { id: current.id, name: current.name } : null} emptyMessage={emptyMessage} />
+            <ContactsTable rows={rows} lists={lists} current={current ? { id: current.id, name: current.name } : null} emptyMessage={emptyMessage} canEmail={can(ctx?.access, "inbox.reply")} />
 
             {pages > 1 ? (
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-mist px-4 py-3 text-sm text-ink-muted sm:px-6">

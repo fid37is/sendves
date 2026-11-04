@@ -3,7 +3,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { FolderInput, FolderPlus } from "lucide-react";
+import { FolderInput, FolderPlus, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -31,6 +31,8 @@ type Props = {
   /** The list being viewed, or null for All contacts / Not in a list. */
   current: { id: string; name: string } | null;
   emptyMessage: string;
+  /** Shows an "Email" shortcut on subscribed contacts (opens a new one-to-one email in the inbox). */
+  canEmail?: boolean;
 };
 
 /** Picks the destination list for "Add to list" and "Move to another list". */
@@ -103,7 +105,7 @@ function ListPickerDrawer({
   );
 }
 
-export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
+export function ContactsTable({ rows, lists, current, emptyMessage, canEmail = false }: Props) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [picker, setPicker] = useState<PickerMode | null>(null);
   const [busy, setBusy] = useState(false);
@@ -227,7 +229,18 @@ export function ContactsTable({ rows, lists, current, emptyMessage }: Props) {
                   className="h-4 w-4 accent-brand-700"
                 />
               </TD>
-              <TD><p className="font-semibold text-ink">{c.name}</p><p className="break-all text-xs text-ink-muted">{c.email}</p></TD>
+              <TD>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0"><p className="font-semibold text-ink">{c.name}</p><p className="break-all text-xs text-ink-muted">{c.email}</p></div>
+                  {canEmail && c.status === "subscribed" ? (
+                    <Tooltip label="Email this contact" align="end">
+                      <Link href={`/app/inbox?compose=${c.id}`} aria-label={`Email ${c.email}`} className="shrink-0 rounded-full p-1.5 text-ink-muted transition-colors hover:bg-brand-50 hover:text-brand-800">
+                        <Mail className="h-4 w-4" aria-hidden="true" />
+                      </Link>
+                    </Tooltip>
+                  ) : null}
+                </div>
+              </TD>
               <TD label="Status"><StatusBadge status={c.status} /></TD>
               <TD label="Lists" wide>
                 {c.lists.length === 0 ? "-" : (

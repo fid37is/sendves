@@ -29,6 +29,14 @@ export async function updateProfileAction(formData: FormData) {
   go(back("account"), "ok", "Profile saved.");
 }
 
+export async function updateNotificationsAction(formData: FormData) {
+  const ctx = await requireWorkspace(BACK);
+  const on = formData.get("notifyInboxReplies") === "on";
+  const { error } = await ctx.db.from("profiles").update({ notify_inbox_replies: on }).eq("id", ctx.user.id);
+  if (error) go(back("account"), "err", missingColumns(error.message) ? "Notifications can’t be saved yet: the database needs its latest update (migration 0012)." : "Couldn’t save that. Try again.");
+  go(back("account"), "ok", on ? "You’ll get an email when a contact replies." : "Reply emails are off.");
+}
+
 /** Business name, contact details and address. The address is also stored as the one line every email footer prints. */
 export async function updateCompanyAction(formData: FormData) {
   const ctx = await requireWorkspace(BACK, "org.settings");

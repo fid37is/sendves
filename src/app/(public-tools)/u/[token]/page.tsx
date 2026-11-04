@@ -4,6 +4,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseUnsubscribeToken } from "@/lib/tokens";
+import { unsubscribeTarget } from "@/server/compliance";
 import { unsubscribeAction } from "./actions";
 
 export const metadata: Metadata = { title: "Unsubscribe", robots: { index: false, follow: false } };
@@ -19,12 +20,11 @@ export default async function UnsubscribePage({ params, searchParams }: { params
   }
 
   try {
-    const sendId = parseUnsubscribeToken(token);
-    if (sendId) {
-      const db = createAdminClient();
-      const { data: send } = await db.from("sends").select("workspaces(name)").eq("id", sendId).maybeSingle();
-      sender = (send as any)?.workspaces?.name ?? "";
-      valid = Boolean(send);
+    const ref = parseUnsubscribeToken(token);
+    if (ref) {
+      const name = await unsubscribeTarget(createAdminClient(), ref);
+      sender = name ?? "";
+      valid = name !== null;
     }
   } catch { /* shown as invalid below */ }
 
