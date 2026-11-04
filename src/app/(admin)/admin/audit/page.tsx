@@ -18,11 +18,29 @@ export default async function AdminAuditPage() {
             {entries.map((e) => (
               <tr key={e.id}>
                 <TD className="whitespace-nowrap">{e.when}</TD>
-                <TD className="font-semibold text-ink">{e.actor}</TD>
-                <TD className="font-mono text-xs">{e.action}</TD>
-                <TD className="break-all text-xs">{e.target}</TD>
-                <TD className="font-mono text-xs">{e.ip}</TD>
-                <TD className="max-w-[260px] break-all text-xs text-ink-muted">{e.detail}</TD>
+                <TD label="Administrator" className="font-semibold text-ink">{e.actor}</TD>
+                <TD label="Action" className="font-mono text-xs">{e.action}</TD>
+                <TD label="Target" className="text-xs">
+                  {e.target ? (
+                    <span title={e.target.full}>
+                      <span className="text-ink">{e.target.type}</span>
+                      {e.target.id ? <span className="ml-1.5 font-mono text-ink-muted">{e.target.id}</span> : null}
+                    </span>
+                  ) : "-"}
+                </TD>
+                <TD label="IP" className="font-mono text-xs">{e.ip}</TD>
+                <TD label="Details" wide className="min-w-[220px] text-xs">
+                  {e.details.length ? (
+                    <dl className="space-y-1">
+                      {e.details.map((d, i) => (
+                        <div key={i} className="flex gap-2">
+                          <dt className="shrink-0 text-ink-muted">{d.label}</dt>
+                          <dd className="min-w-0 break-words font-medium text-ink" title={d.full}>{d.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : <span className="text-ink-muted">-</span>}
+                </TD>
               </tr>
             ))}
             {entries.length === 0 ? <EmptyRow cols={6} message="No activity recorded yet." /> : null}

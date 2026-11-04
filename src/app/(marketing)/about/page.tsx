@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { PageIntro, Section } from "@/components/marketing/section";
 import { CtaBand } from "@/components/marketing/landing-sections";
 
-export const metadata: Metadata = { title: "About", description: "Why Sendves exists and what we believe about email." };
+export const metadata = pageMetadata({ title: "About", description: "Why Sendves exists and what we believe about email.", path: "/about" });
 
 const principles = [
   { title: "Focus beats features", text: "Sendves sends campaigns. We say no to CRM, ad tools and everything else until campaigns are excellent." },

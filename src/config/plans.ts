@@ -24,7 +24,7 @@ export const plans: Plan[] = [
     blurb: "Everything you need to send your first campaigns.",
     contacts: "500 contacts",
     sends: "2,000 emails / month",
-    features: ["Email editor and templates", "Unsubscribe and bounce handling", "Basic reports", "Sendves badge in footer"],
+    features: ["1 business", "Email editor and templates", "Unsubscribe and bounce handling", "Basic reports", "Sendves badge in footer"],
     cta: "Start free",
   },
   {
@@ -35,7 +35,7 @@ export const plans: Plan[] = [
     blurb: "For growing lists that need scheduling and testing.",
     contacts: "5,000 contacts",
     sends: "50,000 emails / month",
-    features: ["Everything in Free", "No Sendves badge", "Scheduling", "A/B subject tests", "Signup forms"],
+    features: ["Everything in Free", "Up to 2 businesses", "No Sendves badge", "Scheduling", "A/B subject tests", "Signup forms"],
     highlight: true,
     cta: "Start free",
   },
@@ -47,7 +47,7 @@ export const plans: Plan[] = [
     blurb: "For teams that segment and collaborate.",
     contacts: "25,000 contacts",
     sends: "250,000 emails / month",
-    features: ["Everything in Starter", "Segmentation", "Team seats", "Priority support"],
+    features: ["Everything in Starter", "Up to 5 businesses", "Segmentation", "Team seats", "Priority support"],
     cta: "Start free",
   },
   {
@@ -58,7 +58,7 @@ export const plans: Plan[] = [
     blurb: "High volume with dedicated infrastructure.",
     contacts: "100,000+ contacts",
     sends: "Custom volume",
-    features: ["Everything in Growth", "Dedicated IP option", "API access", "Service-level agreement"],
+    features: ["Everything in Growth", "Up to 10 businesses", "Dedicated IP option", "API access", "Service-level agreement"],
     cta: "Contact us",
   },
 ];

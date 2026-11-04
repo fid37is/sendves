@@ -57,6 +57,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       organizations={ctx.memberships.map((m) => ({ id: m.id, name: m.name }))}
       activeOrganizationId={ctx.workspace?.id}
       switchOrganization={switchWorkspaceAction}
+      addBusinessHref={ctx.memberships.some((m) => m.role === "owner") ? "/app/businesses/new" : undefined}
     >
       <FlashToast />
       {children}

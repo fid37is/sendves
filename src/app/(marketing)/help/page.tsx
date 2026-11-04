@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { BarChart3, FileText, Globe, ShieldCheck, Upload, Users } from "lucide-react";
 import { PageIntro, Section } from "@/components/marketing/section";
 import { ButtonLink } from "@/components/ui/button";
 
-export const metadata: Metadata = { title: "Help center", description: "Guides for setting up and sending with Sendves." };
+export const metadata = pageMetadata({ title: "Help center", description: "Guides for setting up and sending with Sendves.", path: "/help" });
 
 const topics = [
   { icon: Globe, title: "Set up your sending domain", text: "Add SPF, DKIM and DMARC records and verify them." },

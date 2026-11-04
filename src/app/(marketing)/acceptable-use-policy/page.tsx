@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { LegalPage } from "@/components/marketing/legal-page";
 import { acceptableUse } from "@/content/legal";
 
-export const metadata: Metadata = { title: acceptableUse.title, description: acceptableUse.intro };
+export const metadata = pageMetadata({ title: acceptableUse.title, description: acceptableUse.intro, path: "/acceptable-use-policy" });
 
 export default function Page() {
   return <LegalPage doc={acceptableUse} />;

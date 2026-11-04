@@ -1,6 +1,7 @@
 import { Star, BarChart3, FileText, Globe, Lock, Mail, Smartphone, Users, Zap, Check, ClipboardList } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { env } from "@/lib/env";
+import { planLimits } from "@/config/plan-limits";
 import { sampleStats, sampleTestimonials } from "@/lib/sample-content";
 import { Section, SectionHeading } from "@/components/marketing/section";
 import { LaunchPad } from "@/components/marketing/launch-pad";
@@ -116,6 +117,40 @@ export function FeatureGrid() {
             <p className="mt-2 text-sm text-ink-soft">{text}</p>
           </SpotlightCard>
         ))}
+      </div>
+    </Section>
+  );
+}
+
+const businessPoints = [
+  "Its own logo, brand colour and business address in every footer",
+  "Its own sending domains and sender addresses",
+  "Its own contacts, lists and unsubscribes, never mixed with another business",
+  "Switch between businesses from the sidebar, with one login and one subscription",
+];
+
+export function MultiBusiness() {
+  return (
+    <Section>
+      <div className="grid items-center gap-12 lg:grid-cols-2">
+        <div>
+          <h2 className="text-3xl font-extrabold text-ink sm:text-4xl">Several businesses, one account</h2>
+          <p className="mt-5 text-lg text-ink-soft">
+            Run an online store and an events company, or a few brands, from one login. Each business keeps its own identity and audience, so every email looks and reads like it came from the right company.
+          </p>
+          <p className="mt-4 text-sm font-semibold text-ink-muted">
+            Included: {planLimits.free.businesses} business on Free, {planLimits.starter.businesses} on Starter, {planLimits.growth.businesses} on Growth, {planLimits.scale.businesses} on Scale.
+          </p>
+          <ButtonLink href="/features#businesses" className="mt-8">See how businesses work</ButtonLink>
+        </div>
+        <ul className="space-y-3 rounded-3xl border border-mist bg-white p-7">
+          {businessPoints.map((p) => (
+            <li key={p} className="flex items-start gap-3 text-ink-soft">
+              <Check className="mt-1 h-5 w-5 shrink-0 text-success" aria-hidden="true" />
+              {p}
+            </li>
+          ))}
+        </ul>
       </div>
     </Section>
   );

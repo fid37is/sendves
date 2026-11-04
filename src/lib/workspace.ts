@@ -34,6 +34,8 @@ export type Workspace = {
   address_country?: string | null;
   brand_color?: string | null;
   email_footer_text?: string | null;
+  /** Set on a business added under someone's main business (migration 0016). Null on the main business. */
+  account_workspace_id?: string | null;
 };
 
 /** An organization the signed-in person belongs to. */

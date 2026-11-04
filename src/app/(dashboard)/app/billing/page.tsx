@@ -13,6 +13,7 @@ import { can } from "@/lib/access";
 import { NoAccess } from "@/components/dashboard/no-access";
 import { formatNumber } from "@/lib/utils";
 import { billingEnabled } from "@/server/billing";
+import { getBusinessQuota } from "@/server/businesses";
 import { startCheckoutAction } from "./actions";
 
 export const metadata: Metadata = { title: "Billing" };
@@ -38,7 +39,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
   const providers = ([billingEnabled.stripe() && "stripe", billingEnabled.paystack() && "paystack"].filter(Boolean)) as ("stripe" | "paystack")[];
   const current = (ctx?.workspace?.plan ?? "free").toLowerCase();
   const currentRank = ORDER.indexOf(current);
-  const canUpgrade = currentRank < ORDER.length - 1;
+  const covered = Boolean(ctx?.workspace?.account_workspace_id);
+  const canUpgrade = currentRank < ORDER.length - 1 && !covered;
+  const quota = !covered && ctx?.db ? await getBusinessQuota(ctx.db, ctx.user.id) : null;
 
 
   return (
@@ -53,6 +56,8 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
           <div className="space-y-5 p-4 sm:p-6">
             <Meter label="Contacts" used={workspace.contactsUsed} limit={workspace.contactsLimit} />
             <Meter label="Emails this month" used={workspace.sendsUsed} limit={workspace.sendsLimit} />
+            {quota ? <Meter label="Businesses" used={quota.used} limit={quota.cap} /> : null}
+            {covered ? <p className="text-sm text-ink-muted">This business is covered by the plan on your main business. Contacts and emails above are for this business alone. To change the plan, switch to your main business.</p> : null}
           </div>
           {canUpgrade ? (
             <div className="border-t border-mist p-4 sm:p-6">
