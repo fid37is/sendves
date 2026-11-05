@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { FAQ, PageIntro, Section } from "@/components/marketing/section";
-import { PlanCards } from "@/components/marketing/plan-cards";
+import { PricingExplorer } from "@/components/marketing/pricing-explorer";
 import { CtaBand } from "@/components/marketing/landing-sections";
 import { ANNUAL_BILLING_ENABLED, ANNUAL_MONTHS_PAID, planLimits } from "@/config/plan-limits";
 import { ButtonLink } from "@/components/ui/button";
@@ -32,7 +32,7 @@ export default function PricingPage({ searchParams }: { searchParams: SearchPara
             <span className="text-sm text-ink-soft">Annual pays for {ANNUAL_MONTHS_PAID} months and covers 12.</span>
           </div>
         ) : null}
-        <PlanCards interval={interval} />
+        <PricingExplorer interval={interval} />
       </Section>
       <Section tone="tint">
         <div className="mb-10 text-center">

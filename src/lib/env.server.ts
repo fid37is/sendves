@@ -82,6 +82,9 @@ export const serverEnv = {
       pro_year: process.env.PAYSTACK_PLAN_PRO_YEAR ?? "",
     } as Record<string, string>,
     paystackCurrency: (process.env.PAYSTACK_CURRENCY ?? "").trim().toUpperCase(),
+    // Smallest currency units per 1 USD (kobo per dollar for NGN; 100 when the Paystack currency is USD). Audience prices are in USD
+    // and Paystack charges are worked out from it. Paystack stays switched off until this is set.
+    paystackUnitsPerUsd: Number(process.env.PAYSTACK_UNITS_PER_USD ?? 0),
   },
   limits: {
     newWorkspaceDailySendLimit: Number(process.env.NEW_WORKSPACE_DAILY_SEND_LIMIT ?? 200),

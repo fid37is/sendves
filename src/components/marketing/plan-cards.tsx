@@ -1,14 +1,14 @@
 import { Check } from "lucide-react";
-import { displayPrice, plans } from "@/config/plans";
-import type { BillingInterval } from "@/config/plan-limits";
+import { displayPrice, plansAt } from "@/config/plans";
+import { DEFAULT_AUDIENCE, type BillingInterval } from "@/config/plan-limits";
 import { ButtonLink } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export function PlanCards({ interval = "month" }: { interval?: BillingInterval }) {
+export function PlanCards({ interval = "month", audience = DEFAULT_AUDIENCE }: { interval?: BillingInterval; audience?: number }) {
   return (
     <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-      {plans.map((plan) => {
-        const shown = displayPrice(plan, interval);
+      {plansAt(audience).map((plan) => {
+        const shown = displayPrice(plan, interval, 0, audience);
         return (
         <div
           key={plan.id}

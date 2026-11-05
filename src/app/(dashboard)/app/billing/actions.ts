@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { ANNUAL_BILLING_ENABLED, isSelfServePlan, planRank, type BillingInterval } from "@/config/plan-limits";
+import { ANNUAL_BILLING_ENABLED, effectiveAudience, isAudienceStep, isLowerTarget, isSelfServePlan, type BillingInterval } from "@/config/plan-limits";
 import { planName } from "@/config/plans";
 import { go } from "@/lib/flash";
 import { requireWorkspace } from "@/lib/workspace";
@@ -22,17 +22,19 @@ export async function startCheckoutAction(formData: FormData) {
   const plan = String(formData.get("plan") ?? "");
   const provider = String(formData.get("provider") ?? "");
   const interval: BillingInterval = ANNUAL_BILLING_ENABLED && String(formData.get("interval") ?? "") === "year" ? "year" : "month";
+  const audience = Number(String(formData.get("audience") ?? "").replace(/,/g, ""));
 
   if (ctx.workspace.account_workspace_id) go(BACK, "info", "This business is covered by the subscription on your main business. Switch to your main business to change the plan.");
   if (plan === "custom") go("/contact", "info", "Custom plans are set up with our team. Tell us what you need.");
   if (!isSelfServePlan(plan)) go(BACK, "err", "Choose a plan to continue.");
+  if (!isAudienceStep(audience)) go(BACK, "err", "Choose an audience size to continue.");
   if (provider !== "stripe" && provider !== "paystack") go(BACK, "err", "Choose a payment method.");
   if (!billingEnabled[provider]()) go(BACK, "err", "That payment method isn’t available yet. Contact support to change your plan.");
   if (ctx.workspace.status === "suspended") go(BACK, "err", "Your account is suspended. Contact support before changing your plan.");
 
   const account = await loadAccount(ctx.db, ctx.workspace.id);
   if (!account) go(BACK, "err", "Couldn’t read your subscription. Try again in a moment.");
-  if (account.status === "active" && account.plan === plan) {
+  if (account.status === "active" && account.plan === plan && effectiveAudience(plan, account.audience) === audience) {
     if (!account.pendingPlan) go(BACK, "info", "You’re already on that plan.");
     // Choosing the current plan again while a smaller one is scheduled keeps the current plan.
     try {
@@ -43,7 +45,7 @@ export async function startCheckoutAction(formData: FormData) {
     }
     go(BACK, "ok", `Your scheduled change was cancelled. You’re staying on ${planName(account.plan)}.`);
   }
-  if (account.status === "active" && planRank(plan) < planRank(account.plan)) go(BACK, "info", "To move to a smaller plan, use “Switch at renewal” so it starts when this period ends.");
+  if (account.status === "active" && isLowerTarget({ plan, audience }, account)) go(BACK, "info", "To move to a smaller plan or audience size, use “Switch at renewal” so it starts when this period ends.");
 
   // An account that already pays keeps its billing interval. Everyone else picks monthly or annual here.
   const chosen: BillingInterval = account.status === "active" ? account.interval : interval;
@@ -60,13 +62,13 @@ export async function startCheckoutAction(formData: FormData) {
 
   let result: Awaited<ReturnType<typeof startUpgrade>>;
   try {
-    result = await startUpgrade({ db: ctx.db, account, toPlan: plan, provider: provider as Provider, email: ctx.user.email, interval: chosen, promo });
+    result = await startUpgrade({ db: ctx.db, account, toPlan: plan, toAudience: audience, provider: provider as Provider, email: ctx.user.email, interval: chosen, promo });
   } catch (err) {
     if (err instanceof CheckoutRefused) go(BACK, "err", err.message);
     console.error("[billing] checkout failed:", (err as Error).message);
     go(BACK, "err", "Couldn’t start checkout. Try again, or contact support if this continues.");
   }
-  await recordAudit(ctx.db, { id: ctx.user.id, email: ctx.user.email }, "billing.plan_requested", { type: "workspace", id: account.mainId }, { from: account.plan, to: plan, provider, interval: chosen, promo: promo?.code ?? null });
+  await recordAudit(ctx.db, { id: ctx.user.id, email: ctx.user.email }, "billing.plan_requested", { type: "workspace", id: account.mainId }, { from: account.plan, to: plan, audience, provider, interval: chosen, promo: promo?.code ?? null });
   if (result.kind === "submitted") go(BACK, "info", `Your move to ${planName(plan)} was sent to your payment provider. It takes effect as soon as the payment is confirmed, usually within a minute.`);
   if (result.kind === "applied") go(BACK, "ok", `You’re now on ${planName(plan)}.`);
   redirect(result.url); // outside try/catch: redirect() works by throwing
@@ -76,20 +78,22 @@ export async function startCheckoutAction(formData: FormData) {
 export async function scheduleDowngradeAction(formData: FormData) {
   const ctx = await requireWorkspace(BACK, "billing.manage");
   const plan = String(formData.get("plan") ?? "");
+  const audience = Number(String(formData.get("audience") ?? "").replace(/,/g, ""));
   if (ctx.workspace.account_workspace_id) go(BACK, "info", "Switch to your main business to change the plan.");
   if (!isSelfServePlan(plan)) go(BACK, "err", "Choose a plan to continue.");
+  if (!isAudienceStep(audience)) go(BACK, "err", "Choose an audience size to continue.");
   const account = await loadAccount(ctx.db, ctx.workspace.id);
   if (!account) go(BACK, "err", "Couldn’t read your subscription. Try again in a moment.");
 
   let result: Awaited<ReturnType<typeof scheduleDowngrade>>;
   try {
-    result = await scheduleDowngrade({ db: ctx.db, account, toPlan: plan });
+    result = await scheduleDowngrade({ db: ctx.db, account, toPlan: plan, toAudience: audience });
   } catch (err) {
     console.error("[billing] downgrade failed:", (err as Error).message);
     go(BACK, "err", "Couldn’t schedule that change. Try again, or contact support if this continues.");
   }
   if (!result.ok) go(BACK, "err", result.problems.join(" "));
-  await recordAudit(ctx.db, { id: ctx.user.id, email: ctx.user.email }, "billing.downgrade_scheduled", { type: "workspace", id: account.mainId }, { from: account.plan, to: plan });
+  await recordAudit(ctx.db, { id: ctx.user.id, email: ctx.user.email }, "billing.downgrade_scheduled", { type: "workspace", id: account.mainId }, { from: account.plan, to: plan, audience });
   go(BACK, "ok", `You’ll move to ${planName(plan)} when this billing period ends. Until then you keep everything in ${planName(account.plan)}.`);
 }
 

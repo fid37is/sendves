@@ -8,10 +8,10 @@ const promo = (p: Partial<PromoRow> = {}): PromoRow => ({
   starts_at: null, expires_at: null, max_redemptions: null, redeemed_count: 0, active: true, ...p,
 });
 
-test("annual pays for 11 months and covers 12", () => {
-  assert.equal(ANNUAL_MONTHS_PAID, 11);
+test("annual pays for 10 months and covers 12", () => {
+  assert.equal(ANNUAL_MONTHS_PAID, 10);
   assert.equal(ANNUAL_BILLING_ENABLED, true);
-  assert.deepEqual([planPrices.starter.year, planPrices.growth.year, planPrices.pro.year], [319, 1199, 1529]);
+  assert.deepEqual([planPrices.starter.year, planPrices.growth.year, planPrices.pro.year], [312, 702, 1755]); // at the default audience of 5,000 contacts
 });
 
 test("codes are tidied up and bad ones rejected", () => {

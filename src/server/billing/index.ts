@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import { isSelfServePlan, planLimits, planRank, type BillingInterval, type PlanId, type SelfServePlan } from "@/config/plan-limits";
+import { effectiveAudience, isAudienceStep, isLowerTarget, isSelfServePlan, priceCents, resolveEntitlements, type BillingInterval, type PlanId, type SelfServePlan } from "@/config/plan-limits";
 import { serverEnv } from "@/lib/env.server";
 import { discountedAmount, type PromoDuration } from "@/lib/promo";
 import { addMonthsUtc, downgradeProblems, prorateUpgrade, type SubscriptionStatus } from "@/lib/subscription";
@@ -18,18 +18,77 @@ export type Provider = "stripe" | "paystack";
 
 export const billingEnabled = {
   stripe: () => Boolean(serverEnv.billing.stripeSecretKey),
-  paystack: () => Boolean(serverEnv.billing.paystackSecretKey),
+  // Paystack charges are worked out from the USD price, so it needs the exchange rate as well as the key.
+  paystack: () => Boolean(serverEnv.billing.paystackSecretKey) && serverEnv.billing.paystackUnitsPerUsd > 0,
 };
 
-/** Env key for a plan at a billing interval: "growth" or "growth_year". */
+/** Legacy env key for a plan sold before audience pricing: "growth" or "growth_year". Only subscriptions with no audience stored use it. */
 export const priceKey = (plan: PaidPlan, interval: BillingInterval): string => (interval === "year" ? `${plan}_year` : plan);
 
 const PERIOD_MONTHS: Record<BillingInterval, number> = { month: 1, year: 12 };
 
-/** Whether a payment method can charge this plan at this interval (its price id or amount is set in the environment). */
-export function intervalAvailable(provider: Provider, plan: PaidPlan, interval: BillingInterval): boolean {
-  const key = priceKey(plan, interval);
-  return provider === "stripe" ? Boolean(serverEnv.billing.stripePrices[key]) : Boolean(serverEnv.billing.paystackAmounts[key]);
+/** Whether a payment method can charge at this interval. Prices come from the plan config, so only the provider's own setup matters. */
+export function intervalAvailable(provider: Provider, _plan: PaidPlan, _interval: BillingInterval): boolean {
+  return billingEnabled[provider]();
+}
+
+/** What a provider charges for a plan at an audience size and interval, in its smallest currency unit (cents for Stripe). */
+export function chargeAmount(provider: Provider, plan: PaidPlan, audience: number, interval: BillingInterval): number {
+  const cents = priceCents(plan, audience, interval);
+  return provider === "stripe" ? cents : Math.round((cents / 100) * serverEnv.billing.paystackUnitsPerUsd);
+}
+
+/** Today's charge for the account's current plan, or null when it can't be worked out. Accounts from before audience pricing use their old env amount. */
+function currentPaystackAmount(account: Account): number | null {
+  if (!isSelfServePlan(account.plan)) return null;
+  if (account.audience !== null) return chargeAmount("paystack", account.plan, account.audience, account.interval);
+  return serverEnv.billing.paystackAmounts[priceKey(account.plan, account.interval)] || null;
+}
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * The Stripe price for a plan at an audience size and interval. Prices are created on first use and found again by their
+ * lookup key (which includes the amount, so changing a price in the config creates a new Stripe price instead of editing an old one).
+ */
+async function stripePriceFor(plan: PaidPlan, audience: number, interval: BillingInterval): Promise<string> {
+  const cents = priceCents(plan, audience, interval);
+  const lookupKey = `sendves_${plan}_${audience}_${interval}_${cents}`;
+  const find = async (): Promise<string | undefined> => (await stripeApi(`/prices?lookup_keys%5B%5D=${encodeURIComponent(lookupKey)}&limit=1`))?.data?.[0]?.id;
+  const existing = await find();
+  if (existing) return existing;
+  try {
+    const created = await stripeApi("/prices", {
+      method: "POST",
+      form: {
+        currency: "usd", unit_amount: String(cents), "recurring[interval]": interval, lookup_key: lookupKey,
+        "product_data[name]": `Sendves ${cap(plan)}: ${audience.toLocaleString("en-US")} contacts`,
+        "metadata[plan_id]": plan, "metadata[audience]": String(audience), "metadata[interval]": interval,
+      },
+    });
+    return created.id as string;
+  } catch (err) {
+    const raced = await find(); // another request may have created it a moment ago
+    if (raced) return raced;
+    throw err;
+  }
+}
+
+/** The Paystack plan code for a plan at an audience size and interval, created in Paystack the first time it is needed. */
+async function ensurePaystackPlan(db: Db, plan: PaidPlan, audience: number, interval: BillingInterval): Promise<string> {
+  const amount = chargeAmount("paystack", plan, audience, interval);
+  const currency = serverEnv.billing.paystackCurrency;
+  const key = `${plan}:${audience}:${interval}:${amount}:${currency || "default"}`;
+  const { data: row } = await db.from("billing_plan_codes").select("code").eq("provider", "paystack").eq("key", key).maybeSingle();
+  if (row?.code) return row.code as string;
+  const created = await paystackApi("/plan", {
+    method: "POST",
+    body: { name: `Sendves ${cap(plan)} ${audience.toLocaleString("en-US")} contacts ${interval === "year" ? "annual" : "monthly"}`, amount, interval: interval === "year" ? "annually" : "monthly", ...(currency ? { currency } : {}) },
+  });
+  const code = created?.data?.plan_code as string | undefined;
+  if (!code) throw new Error("Paystack did not return a plan code.");
+  await db.from("billing_plan_codes").upsert({ provider: "paystack", key, code });
+  return code;
 }
 
 /** A promo code that has been checked and may be applied to a checkout. */
@@ -40,15 +99,15 @@ export class CheckoutRefused extends Error {}
 
 // ── Checkout (first payment, or paying again after a trial or lapse) ──────────────────────────────
 
-export async function createCheckout(args: { provider: Provider; plan: PaidPlan; interval?: BillingInterval; workspaceId: string; email: string; promo?: PromoDiscount }): Promise<string> {
-  const { provider, plan, workspaceId, email, promo } = args;
+export async function createCheckout(args: { db: Db; provider: Provider; plan: PaidPlan; audience: number; interval?: BillingInterval; workspaceId: string; email: string; promo?: PromoDiscount }): Promise<string> {
+  const { db, provider, plan, audience, workspaceId, email, promo } = args;
   const interval = args.interval ?? "month";
-  const key = priceKey(plan, interval);
   const base = serverEnv.appUrl;
+  if (!isAudienceStep(audience)) throw new CheckoutRefused("Choose an audience size to continue.");
 
   if (provider === "stripe") {
-    const price = serverEnv.billing.stripePrices[key];
-    if (!serverEnv.billing.stripeSecretKey || !price) throw new Error("Stripe is not configured for this plan.");
+    if (!serverEnv.billing.stripeSecretKey) throw new Error("Stripe is not configured.");
+    const price = await stripePriceFor(plan, audience, interval);
     const params: Record<string, string> = {
       mode: "subscription",
       "line_items[0][price]": price,
@@ -58,9 +117,11 @@ export async function createCheckout(args: { provider: Provider; plan: PaidPlan;
       customer_email: email,
       client_reference_id: workspaceId,
       "metadata[plan_id]": plan,
+      "metadata[audience]": String(audience),
       "metadata[workspace_id]": workspaceId,
       // Carried onto the subscription itself, so every later subscription event can be matched to the account.
       "subscription_data[metadata][plan_id]": plan,
+      "subscription_data[metadata][audience]": String(audience),
       "subscription_data[metadata][workspace_id]": workspaceId,
     };
     if (promo) {
@@ -86,9 +147,9 @@ export async function createCheckout(args: { provider: Provider; plan: PaidPlan;
     return json.url as string;
   }
 
-  const amount = serverEnv.billing.paystackAmounts[key];
-  if (!serverEnv.billing.paystackSecretKey || !amount) throw new Error("Paystack is not configured for this plan.");
-  const planCode = serverEnv.billing.paystackPlans[key];
+  if (!billingEnabled.paystack()) throw new Error("Paystack is not configured.");
+  const amount = chargeAmount("paystack", plan, audience, interval);
+  const planCode = await ensurePaystackPlan(db, plan, audience, interval);
   if (promo) {
     // Paystack bills a plan code at its fixed amount, so a discounted first payment is a one-off charge. The recurring plan
     // then starts when that first period ends (see startPaystackRecurring), at the full price. The discount covers the first payment only.
@@ -96,12 +157,12 @@ export async function createCheckout(args: { provider: Provider; plan: PaidPlan;
     if (discounted < 100) throw new CheckoutRefused("This code can’t be used with Paystack because nothing would be left to charge. Try another payment method.");
     return paystackInitialize({
       email, amount: discounted,
-      metadata: { kind: "subscribe", workspace_id: workspaceId, plan_id: plan, interval, promo_id: promo.id, recurring_after: Boolean(planCode) },
+      metadata: { kind: "subscribe", workspace_id: workspaceId, plan_id: plan, audience, interval, promo_id: promo.id, recurring_after: Boolean(planCode) },
     });
   }
   return paystackInitialize({
-    email, amount, metadata: { kind: "subscribe", workspace_id: workspaceId, plan_id: plan, interval },
-    ...(planCode ? { plan: planCode } : {}),
+    email, amount, metadata: { kind: "subscribe", workspace_id: workspaceId, plan_id: plan, audience, interval },
+    plan: planCode,
   });
 }
 
@@ -184,6 +245,8 @@ type Activation = {
   priceId?: string | null;
   currency?: string | null;
   cancelAtPeriodEnd?: boolean;
+  /** The audience size bought. Leave undefined to keep the one already stored (renewals); null clears it (legacy prices). */
+  audience?: number | null;
 };
 
 /** Makes the account active on a plan for a billing period. Pooled limits come from the plan; nothing is copied to businesses. */
@@ -199,6 +262,8 @@ export async function activateSubscription(db: Db, mainId: string, a: Activation
     cancel_at_period_end: a.cancelAtPeriodEnd ?? false,
     canceled_at: null,
     pending_plan: null,
+    pending_audience_contacts: null,
+    ...(a.audience !== undefined ? { audience_contacts: a.audience } : {}),
     ...(a.customerId ? { provider_customer_id: a.customerId } : {}),
     ...(a.subscriptionId ? { provider_subscription_id: a.subscriptionId } : {}),
     ...(a.priceId ? { billing_price_id: a.priceId } : {}),
@@ -230,12 +295,12 @@ async function findAccount(db: Db, k: { workspaceId?: string | null; customerId?
 
 /**
  * Points the recurring Paystack subscription at another plan from the next renewal: the old subscription is disabled
- * and a new one starts when the current period ends. Best effort: it needs the plan code in env and the stored customer
+ * and a new one starts when the current period ends. Best effort: it needs the plan code (created in Paystack when missing) and the stored customer
  * and subscription codes, and returns false (and logs) rather than throwing so a payment that already succeeded is kept.
  */
-async function repointPaystackSubscription(db: Db, account: Account, toPlan: PaidPlan): Promise<boolean> {
+async function repointPaystackSubscription(db: Db, account: Account, toPlan: PaidPlan, toAudience: number | null): Promise<boolean> {
   try {
-    const planCode = serverEnv.billing.paystackPlans[priceKey(toPlan, account.interval)];
+    const planCode = toAudience !== null ? await ensurePaystackPlan(db, toPlan, toAudience, account.interval) : serverEnv.billing.paystackPlans[priceKey(toPlan, account.interval)];
     if (!planCode || !account.providerSubscriptionId || !account.providerCustomerId) return false;
     const current = await paystackApi(`/subscription/${encodeURIComponent(account.providerSubscriptionId)}`);
     const token = current?.data?.email_token as string | undefined;
@@ -264,9 +329,9 @@ async function once(db: Db, provider: Provider, id: string, type: string, work: 
 }
 
 /** Starts the recurring Paystack plan when the period paid by a one-off (discounted) first payment ends. Best effort, like repointing. */
-async function startPaystackRecurring(account: Account, plan: PaidPlan, start: Date): Promise<boolean> {
+async function startPaystackRecurring(db: Db, account: Account, plan: PaidPlan, audience: number | null, start: Date): Promise<boolean> {
   try {
-    const planCode = serverEnv.billing.paystackPlans[priceKey(plan, account.interval)];
+    const planCode = audience !== null ? await ensurePaystackPlan(db, plan, audience, account.interval) : serverEnv.billing.paystackPlans[priceKey(plan, account.interval)];
     if (!planCode || !account.providerCustomerId) return false;
     await paystackApi("/subscription", { method: "POST", body: { customer: account.providerCustomerId, plan: planCode, start_date: start.toISOString() } });
     return true;
@@ -285,6 +350,9 @@ export async function handlePaystackEvent(db: Db, event: any): Promise<void> {
   await once(db, "paystack", `${type}:${uid}`, type, () => processPaystackEvent(db, type, d));
 }
 
+/** The audience size a Paystack charge was made for. Null on payments started before audience pricing. */
+const audienceOf = (meta: any): number | null => (isAudienceStep(Number(meta?.audience)) ? Number(meta.audience) : null);
+
 async function processPaystackEvent(db: Db, type: string, d: any): Promise<void> {
 
   const customerId = (d.customer?.customer_code as string | undefined) ?? null;
@@ -302,9 +370,9 @@ async function processPaystackEvent(db: Db, type: string, d: any): Promise<void>
       await activateSubscription(db, account.mainId, {
         plan: meta.plan_id, provider: "paystack", ref: d.reference ?? null, interval: account.interval,
         periodStart: account.periodStart ?? paidAt, periodEnd: account.periodEnd ?? addMonthsUtc(paidAt, PERIOD_MONTHS[account.interval]),
-        customerId,
+        customerId, audience: audienceOf(meta),
       });
-      await repointPaystackSubscription(db, account, meta.plan_id);
+      await repointPaystackSubscription(db, account, meta.plan_id, audienceOf(meta));
       return;
     }
     if (meta.workspace_id && isSelfServePlan(meta.plan_id)) {
@@ -313,14 +381,14 @@ async function processPaystackEvent(db: Db, type: string, d: any): Promise<void>
       if (!account) return;
       await activateSubscription(db, account.mainId, {
         plan: meta.plan_id, provider: "paystack", ref: d.reference ?? null, interval,
-        periodStart: paidAt, periodEnd: addMonthsUtc(paidAt, PERIOD_MONTHS[interval]), customerId, currency: d.currency ?? null,
+        periodStart: paidAt, periodEnd: addMonthsUtc(paidAt, PERIOD_MONTHS[interval]), customerId, currency: d.currency ?? null, audience: audienceOf(meta),
       });
       if (meta.promo_id) {
         await recordRedemption(db, String(meta.promo_id), account.mainId, "paystack", d.reference ?? null);
         // The discounted payment was a one-off, so the recurring plan is started for the day this paid period ends.
         if (meta.recurring_after) {
           const fresh = await loadAccount(db, account.mainId);
-          if (fresh?.periodEnd) await startPaystackRecurring(fresh, meta.plan_id, fresh.periodEnd);
+          if (fresh?.periodEnd) await startPaystackRecurring(db, fresh, meta.plan_id, audienceOf(meta), fresh.periodEnd);
         }
       }
       return;
@@ -368,6 +436,16 @@ function planForStripePrice(priceId: string | null | undefined): { plan: PaidPla
   return null;
 }
 
+/** What a Stripe subscription item is: the plan, audience and interval recorded on its price, or the legacy env price ids for older subscriptions. */
+function targetFromStripeItem(item: any): { plan: PaidPlan; interval: BillingInterval; audience: number | null } | null {
+  const m = item?.price?.metadata ?? {};
+  if (isSelfServePlan(m.plan_id) && isAudienceStep(Number(m.audience))) {
+    return { plan: m.plan_id, interval: m.interval === "year" || item?.price?.recurring?.interval === "year" ? "year" : "month", audience: Number(m.audience) };
+  }
+  const legacy = planForStripePrice(item?.price?.id);
+  return legacy ? { ...legacy, audience: null } : null;
+}
+
 function mapStripeStatus(s: string): SubscriptionStatus {
   switch (s) {
     case "active": case "trialing": return "active";
@@ -387,7 +465,7 @@ async function applyStripeSubscription(db: Db, sub: any, hint?: { workspaceId?: 
   if (!account) return;
   const status = mapStripeStatus(String(sub.status));
   const priceId = item?.price?.id as string | undefined;
-  const target = planForStripePrice(priceId);
+  const target = targetFromStripeItem(item);
   const start = fromUnix(sub.current_period_start ?? item?.current_period_start);
   const end = fromUnix(sub.current_period_end ?? item?.current_period_end);
   const common = {
@@ -401,15 +479,17 @@ async function applyStripeSubscription(db: Db, sub: any, hint?: { workspaceId?: 
 
   if (status === "active" && target && start && end) {
     // A scheduled downgrade is already priced in Stripe, but the customer keeps what they paid for until the period turns over.
-    if (account.pendingPlan === target.plan && planRank(target.plan) < planRank(account.plan) && account.periodEnd && start.getTime() < account.periodEnd.getTime()) {
+    const scheduled = account.pendingPlan === target.plan && (account.pendingAudience ?? null) === target.audience;
+    if (scheduled && isLowerTarget(target, account) && account.periodEnd && start.getTime() < account.periodEnd.getTime()) {
       await db.from("workspaces").update(common).eq("id", account.mainId);
       return;
     }
-    if (account.pendingPlan === target.plan) await applyPendingPlan(db, account.mainId);
+    if (scheduled) await applyPendingPlan(db, account.mainId);
     await activateSubscription(db, account.mainId, {
       plan: target.plan, provider: "stripe", ref: sub.id as string,
       interval: target.interval, periodStart: start, periodEnd: end,
       customerId: common.provider_customer_id, subscriptionId: sub.id, priceId, currency: common.billing_currency as string | undefined, cancelAtPeriodEnd: common.cancel_at_period_end,
+      audience: target.audience,
     });
     return;
   }
@@ -458,21 +538,22 @@ export type UpgradeResult =
   | { kind: "applied" };    // nothing to charge, applied now
 
 /**
- * Moves the account to a dearer plan (for example Starter -> Growth to add a second business). It is the SAME
- * subscription: no second one is created. Stripe prorates natively. Paystack has no proration, so the unused value of
- * the old price is credited against the new price for the days left, the difference is charged once, and the new plan
- * only applies after that payment is confirmed by a verified event. A browser redirect never unlocks anything.
+ * Moves the account to a dearer choice: a bigger plan (Starter -> Growth to add a second business), a bigger audience on
+ * the same plan, or both. It is the SAME subscription: no second one is created. Stripe prorates natively. Paystack has no
+ * proration, so the unused value of the old price is credited against the new price for the days left, the difference is
+ * charged once, and the new plan only applies after that payment is confirmed by a verified event. A browser redirect
+ * never unlocks anything.
  */
-export async function startUpgrade(a: { db: Db; account: Account; toPlan: PaidPlan; provider: Provider; email: string; interval?: BillingInterval; promo?: PromoDiscount }): Promise<UpgradeResult> {
-  const { db, account, toPlan, email } = a;
+export async function startUpgrade(a: { db: Db; account: Account; toPlan: PaidPlan; toAudience: number; provider: Provider; email: string; interval?: BillingInterval; promo?: PromoDiscount }): Promise<UpgradeResult> {
+  const { db, account, toPlan, toAudience, email } = a;
   const paidUp = account.status === "active" && Boolean(account.provider);
   // Still on a trial, or lapsed: the first (or a fresh) payment is an ordinary checkout.
   // The customer chooses monthly or annual here, and may apply a promo code. An account that already pays keeps its interval.
-  if (!paidUp) return { kind: "checkout", url: await createCheckout({ provider: a.provider, plan: toPlan, interval: a.interval ?? account.interval, workspaceId: account.mainId, email, promo: a.promo }) };
+  if (!paidUp) return { kind: "checkout", url: await createCheckout({ db, provider: a.provider, plan: toPlan, audience: toAudience, interval: a.interval ?? account.interval, workspaceId: account.mainId, email, promo: a.promo }) };
 
   if (account.provider === "stripe") {
-    const newPrice = serverEnv.billing.stripePrices[priceKey(toPlan, account.interval)];
-    if (!account.providerSubscriptionId || !newPrice) throw new Error("Stripe is not configured for this plan.");
+    if (!account.providerSubscriptionId) throw new Error("Stripe is not configured for this plan.");
+    const newPrice = await stripePriceFor(toPlan, toAudience, account.interval);
     const sub = await stripeApi(`/subscriptions/${encodeURIComponent(account.providerSubscriptionId)}`);
     const itemId = sub?.items?.data?.[0]?.id as string | undefined;
     if (!itemId) throw new Error("Couldn’t read your subscription from Stripe.");
@@ -481,24 +562,24 @@ export async function startUpgrade(a: { db: Db; account: Account; toPlan: PaidPl
       form: {
         "items[0][id]": itemId, "items[0][price]": newPrice,
         proration_behavior: "always_invoice", payment_behavior: "pending_if_incomplete",
-        "metadata[plan_id]": toPlan, cancel_at_period_end: "false",
+        "metadata[plan_id]": toPlan, "metadata[audience]": String(toAudience), cancel_at_period_end: "false",
       },
     });
     return { kind: "submitted" }; // customer.subscription.updated applies it once Stripe confirms payment
   }
 
-  const oldAmount = serverEnv.billing.paystackAmounts[priceKey(account.plan as PaidPlan, account.interval)];
-  const newAmount = serverEnv.billing.paystackAmounts[priceKey(toPlan, account.interval)];
+  const oldAmount = currentPaystackAmount(account);
+  const newAmount = chargeAmount("paystack", toPlan, toAudience, account.interval);
   if (!oldAmount || !newAmount || !account.periodStart || !account.periodEnd) throw new Error("Paystack is not configured for this change.");
   const { due } = prorateUpgrade({ oldAmount, newAmount, periodStart: account.periodStart, periodEnd: account.periodEnd });
   if (due <= 0) {
-    await activateSubscription(db, account.mainId, { plan: toPlan, provider: "paystack", ref: null, interval: account.interval, periodStart: account.periodStart, periodEnd: account.periodEnd });
-    await repointPaystackSubscription(db, account, toPlan);
+    await activateSubscription(db, account.mainId, { plan: toPlan, provider: "paystack", ref: null, interval: account.interval, periodStart: account.periodStart, periodEnd: account.periodEnd, audience: toAudience });
+    await repointPaystackSubscription(db, account, toPlan, toAudience);
     return { kind: "applied" };
   }
   const url = await paystackInitialize({
     email, amount: due,
-    metadata: { kind: "upgrade", workspace_id: account.mainId, plan_id: toPlan, interval: account.interval, expected_amount: due },
+    metadata: { kind: "upgrade", workspace_id: account.mainId, plan_id: toPlan, audience: toAudience, interval: account.interval, expected_amount: due },
   });
   return { kind: "checkout", url };
 }
@@ -506,45 +587,46 @@ export async function startUpgrade(a: { db: Db; account: Account; toPlan: PaidPl
 export type DowngradeResult = { ok: true } | { ok: false; problems: string[] };
 
 /**
- * Schedules a move to a smaller plan for the end of the current period. It is refused while the account is too big
- * for the smaller plan, and nothing is ever deleted to make it fit. Until the period ends the customer keeps what they paid for.
+ * Schedules a smaller choice (a smaller plan, a smaller audience, or both) for the end of the current period. It is
+ * refused while the account is too big for it, and nothing is ever deleted to make it fit. Until the period ends the
+ * customer keeps what they paid for.
  */
-export async function scheduleDowngrade(a: { db: Db; account: Account; toPlan: PaidPlan }): Promise<DowngradeResult> {
-  const { db, account, toPlan } = a;
+export async function scheduleDowngrade(a: { db: Db; account: Account; toPlan: PaidPlan; toAudience: number }): Promise<DowngradeResult> {
+  const { db, account, toPlan, toAudience } = a;
   if (account.status !== "active") return { ok: false, problems: ["Plans can be scheduled once your subscription is active."] };
-  if (planRank(toPlan) >= planRank(account.plan)) return { ok: false, problems: ["Choose a smaller plan to downgrade to."] };
+  if (!isLowerTarget({ plan: toPlan, audience: toAudience }, account)) return { ok: false, problems: ["Choose a smaller plan or audience size to switch down to."] };
   const usage = await getAccountUsage(db, account.mainId);
   if (!usage) return { ok: false, problems: ["Couldn’t check your usage. Try again in a moment."] };
-  const problems = downgradeProblems(planLimits[toPlan], { businesses: usage.businessCount, contacts: usage.contactsUsed }, toPlan.charAt(0).toUpperCase() + toPlan.slice(1));
+  const problems = downgradeProblems(resolveEntitlements(toPlan, {}, toAudience), { businesses: usage.businessCount, contacts: usage.contactsUsed }, toPlan.charAt(0).toUpperCase() + toPlan.slice(1));
   if (problems.length) return { ok: false, problems };
 
   if (account.provider === "stripe" && account.providerSubscriptionId) {
-    const newPrice = serverEnv.billing.stripePrices[priceKey(toPlan, account.interval)];
-    if (!newPrice) throw new Error("Stripe is not configured for this plan.");
+    const newPrice = await stripePriceFor(toPlan, toAudience, account.interval);
     const sub = await stripeApi(`/subscriptions/${encodeURIComponent(account.providerSubscriptionId)}`);
     const itemId = sub?.items?.data?.[0]?.id as string | undefined;
     if (!itemId) throw new Error("Couldn’t read your subscription from Stripe.");
     // No proration: the lower price starts with the next invoice.
     await stripeApi(`/subscriptions/${encodeURIComponent(account.providerSubscriptionId)}`, { method: "POST", form: { "items[0][id]": itemId, "items[0][price]": newPrice, proration_behavior: "none" } });
   } else if (account.provider === "paystack") {
-    await repointPaystackSubscription(db, account, toPlan);
+    await repointPaystackSubscription(db, account, toPlan, toAudience);
   }
-  await db.from("workspaces").update({ pending_plan: toPlan }).eq("id", account.mainId);
+  await db.from("workspaces").update({ pending_plan: toPlan, pending_audience_contacts: toAudience }).eq("id", account.mainId);
   return { ok: true };
 }
 
-/** Cancels a scheduled downgrade: the provider is put back on the current plan's price and the schedule is cleared. */
+/** Cancels a scheduled downgrade: the provider is put back on the current price and the schedule is cleared. */
 export async function cancelScheduledDowngrade(db: Db, account: Account): Promise<void> {
   if (!account.pendingPlan) return;
   if (isSelfServePlan(account.plan)) {
     if (account.provider === "stripe" && account.providerSubscriptionId) {
-      const price = serverEnv.billing.stripePrices[priceKey(account.plan, account.interval)];
+      // Accounts from before audience pricing go back to the price id they were sold under.
+      const price = account.audience !== null ? await stripePriceFor(account.plan, account.audience, account.interval) : serverEnv.billing.stripePrices[priceKey(account.plan, account.interval)];
       const sub = await stripeApi(`/subscriptions/${encodeURIComponent(account.providerSubscriptionId)}`);
       const itemId = sub?.items?.data?.[0]?.id as string | undefined;
       if (price && itemId) await stripeApi(`/subscriptions/${encodeURIComponent(account.providerSubscriptionId)}`, { method: "POST", form: { "items[0][id]": itemId, "items[0][price]": price, proration_behavior: "none" } });
     } else if (account.provider === "paystack") {
-      await repointPaystackSubscription(db, { ...account, providerSubscriptionId: account.providerSubscriptionId }, account.plan);
+      await repointPaystackSubscription(db, { ...account, providerSubscriptionId: account.providerSubscriptionId }, account.plan, account.audience);
     }
   }
-  await db.from("workspaces").update({ pending_plan: null }).eq("id", account.mainId);
+  await db.from("workspaces").update({ pending_plan: null, pending_audience_contacts: null }).eq("id", account.mainId);
 }

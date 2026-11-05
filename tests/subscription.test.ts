@@ -11,7 +11,7 @@ test("the catalogue is Starter, Growth, Pro and Custom with the specified pools"
   assert.deepEqual([planLimits.starter.businesses, planLimits.starter.contacts, planLimits.starter.monthlySends], [1, 5_000, 60_000]);
   assert.deepEqual([planLimits.growth.businesses, planLimits.growth.contacts, planLimits.growth.monthlySends], [2, 27_000, 324_000]);
   assert.deepEqual([planLimits.pro.businesses, planLimits.pro.contacts, planLimits.pro.monthlySends], [5, 27_000, 648_000]);
-  assert.deepEqual(SELF_SERVE_PLANS.map((p) => planPrices[p].month), [29, 109, 139]);
+  assert.deepEqual(SELF_SERVE_PLANS.map((p) => planPrices[p].month), [31.2, 70.2, 175.5]); // at the default audience of 5,000 contacts
   for (const p of Object.values(planLimits)) assert.equal(p.trialDays, 14);
 });
 

@@ -781,7 +781,7 @@ export async function getAdminWorkspaceDetail(id: string) {
     id: w.id as string, name: w.name as string, plan: String(w.plan), status: w.status as WorkspaceStatus, created: fmt(w.created_at),
     timezone: (w.timezone as string) || "UTC", address: (w.business_address as string) || "", dailyLimit: Number(w.daily_send_limit),
     // Account-level entitlements of the account this business belongs to (the main business carries the subscription).
-    planLimits: resolveEntitlements(String(w.plan), w.entitlement_overrides),
+    planLimits: resolveEntitlements(String(w.plan), w.entitlement_overrides, w.audience_contacts),
     isMain: !w.account_workspace_id,
     accountUsage: acct ? {
       contactsUsed: acct.contactsUsed, contactsLimit: acct.limits.contacts, emailsSent: acct.emailsSent, emailsLimit: acct.limits.emails,

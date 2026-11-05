@@ -21,7 +21,7 @@ import type { Db } from "@/lib/supabase/admin";
 export const COUNTED_SEND_STATUSES = ["queued", "sending", "sent", "delivered", "bounced", "complained"] as const;
 
 const COLUMNS =
-  "id, name, owner_id, plan, status, account_workspace_id, subscription_status, billing_interval, trial_started_at, trial_ends_at, billing_period_start, billing_period_end, cancel_at_period_end, pending_plan, billing_provider, billing_ref, provider_customer_id, provider_subscription_id, billing_price_id, entitlement_overrides, contact_cap, send_cap, cap_mode";
+  "id, name, owner_id, plan, status, account_workspace_id, subscription_status, billing_interval, trial_started_at, trial_ends_at, billing_period_start, billing_period_end, cancel_at_period_end, pending_plan, billing_provider, billing_ref, provider_customer_id, provider_subscription_id, billing_price_id, entitlement_overrides, audience_contacts, pending_audience_contacts, contact_cap, send_cap, cap_mode";
 
 export type Account = {
   /** The main business: the owner of the subscription. */
@@ -39,6 +39,10 @@ export type Account = {
   periodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
   pendingPlan: PlanId | null;
+  /** The audience size (contacts) the account bought, or null for accounts from before audience pricing. */
+  audience: number | null;
+  /** The audience size scheduled for the next period alongside pendingPlan. */
+  pendingAudience: number | null;
   provider: string | null;
   providerCustomerId: string | null;
   providerSubscriptionId: string | null;
@@ -61,9 +65,11 @@ function toAccount(r: any): Account {
     periodStart: asDate(r.billing_period_start), periodEnd: asDate(r.billing_period_end),
     cancelAtPeriodEnd: Boolean(r.cancel_at_period_end),
     pendingPlan: r.pending_plan ? normalizePlanId(r.pending_plan) : null,
+    audience: r.audience_contacts ? Number(r.audience_contacts) : null,
+    pendingAudience: r.pending_audience_contacts ? Number(r.pending_audience_contacts) : null,
     provider: r.billing_provider ?? null, providerCustomerId: r.provider_customer_id ?? null,
     providerSubscriptionId: r.provider_subscription_id ?? null, billingPriceId: r.billing_price_id ?? null,
-    limits: resolveEntitlements(plan, overrides), overrides,
+    limits: resolveEntitlements(plan, overrides, r.audience_contacts ? Number(r.audience_contacts) : null), overrides,
   };
 }
 
@@ -89,9 +95,13 @@ export async function loadAccount(db: Db, workspaceId: string): Promise<Account 
 
 /** Moves the account onto the plan it scheduled earlier (a downgrade). Nothing is deleted. */
 export async function applyPendingPlan(db: Db, mainId: string): Promise<void> {
-  const { data } = await db.from("workspaces").select("pending_plan").eq("id", mainId).maybeSingle();
+  const { data } = await db.from("workspaces").select("pending_plan, pending_audience_contacts").eq("id", mainId).maybeSingle();
   if (!data?.pending_plan) return;
-  await db.from("workspaces").update({ plan: normalizePlanId(data.pending_plan), pending_plan: null }).eq("id", mainId);
+  await db.from("workspaces").update({
+    plan: normalizePlanId(data.pending_plan),
+    ...(data.pending_audience_contacts ? { audience_contacts: data.pending_audience_contacts } : {}),
+    pending_plan: null, pending_audience_contacts: null,
+  }).eq("id", mainId);
   await syncEntitlements(db, mainId);
 }
 
@@ -101,9 +111,9 @@ export async function applyPendingPlan(db: Db, mainId: string): Promise<void> {
  * per-business limits (daily limit, domains) are read from. Pooled limits are never copied onto businesses.
  */
 export async function syncEntitlements(db: Db, mainId: string): Promise<void> {
-  const { data: main } = await db.from("workspaces").select("id, plan, entitlement_overrides, daily_send_limit").eq("id", mainId).maybeSingle();
+  const { data: main } = await db.from("workspaces").select("id, plan, entitlement_overrides, audience_contacts, daily_send_limit").eq("id", mainId).maybeSingle();
   if (!main) return;
-  const limits = resolveEntitlements(main.plan, main.entitlement_overrides);
+  const limits = resolveEntitlements(main.plan, main.entitlement_overrides, main.audience_contacts);
   await db.from("workspaces").update({ contact_pool_limit: limits.contacts, daily_send_limit: Math.max(main.daily_send_limit, limits.startDaily) }).eq("id", mainId);
   const { data: rows } = await db.from("workspaces").select("id, daily_send_limit").eq("account_workspace_id", mainId);
   await Promise.all((rows ?? []).map((r: { id: string; daily_send_limit: number }) =>

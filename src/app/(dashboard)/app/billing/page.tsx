@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { ANNUAL_BILLING_ENABLED, ANNUAL_MONTHS_PAID, planRank, SELF_SERVE_PLANS, type BillingInterval } from "@/config/plan-limits";
-import { displayPrice, plans, planName } from "@/config/plans";
+import { ANNUAL_BILLING_ENABLED, ANNUAL_MONTHS_PAID, DEFAULT_AUDIENCE, effectiveAudience, isAudienceStep, isLowerTarget, nearestAudience, SELF_SERVE_PLANS, type BillingInterval } from "@/config/plan-limits";
+import { displayPrice, plansAt, planName } from "@/config/plans";
+import { BillingAudienceSlider } from "@/components/billing/audience-slider";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -100,6 +101,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
   }
   const promoParam = promoCode ? `&promo=${encodeURIComponent(promoCode)}` : "";
 
+  // The audience size the plans are priced at: the one chosen on the slider, else the account's own (or the default while on a trial).
+  const requested = Number(String(searchParams.audience ?? "").replace(/,/g, ""));
+  const audience = isAudienceStep(requested) ? requested : paidUp ? nearestAudience(effectiveAudience(account.plan, account.audience)) : DEFAULT_AUDIENCE;
+
   return (
     <>
       {searchParams.checkout === "complete" ? (
@@ -121,7 +126,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
               <div className="flex justify-between gap-4"><dt className="text-ink-muted">{account.cancelAtPeriodEnd || account.status === "canceled" ? "Ends on" : "Renews on"}</dt><dd className="font-medium text-ink">{day(account.periodEnd)}</dd></div>
             ) : null}
             {account.pendingPlan ? (
-              <div className="flex justify-between gap-4"><dt className="text-ink-muted">Scheduled change</dt><dd className="font-medium text-ink">{planName(account.pendingPlan)} from {day(account.periodEnd)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-ink-muted">Scheduled change</dt><dd className="font-medium text-ink">{planName(account.pendingPlan)}{account.pendingAudience ? ` (${formatNumber(account.pendingAudience)} contacts)` : ""} from {day(account.periodEnd)}</dd></div>
             ) : null}
           </dl>
           {!access.sending && access.reason ? <p className="mx-4 mt-4 rounded-xl bg-danger-soft p-4 text-sm text-danger sm:mx-6">{access.reason}</p> : null}
@@ -150,17 +155,23 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
         <div className="space-y-6">
           <Card id="plans" className="scroll-mt-24">
             <CardHeader title="Plans" description="14-day free trial on every plan. Contacts and emails are shared across your businesses." />
+            {!covered ? (
+              <div className="border-b border-mist px-4 py-4 sm:px-6">
+                <BillingAudienceSlider audience={audience} interval={interval} promo={promoCode} />
+              </div>
+            ) : null}
             {!paidUp && !covered ? (
               <div className="space-y-4 border-b border-mist px-4 py-4 sm:px-6">
                 {annualReady ? (
                   <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Billing interval">
-                    <ButtonLink href={`/app/billing?interval=month${promoParam}#plans`} size="sm" variant={interval === "month" ? "primary" : "outline"}>Monthly</ButtonLink>
-                    <ButtonLink href={`/app/billing?interval=year${promoParam}#plans`} size="sm" variant={interval === "year" ? "primary" : "outline"}>Annual</ButtonLink>
+                    <ButtonLink href={`/app/billing?audience=${audience}&interval=month${promoParam}#plans`} size="sm" variant={interval === "month" ? "primary" : "outline"}>Monthly</ButtonLink>
+                    <ButtonLink href={`/app/billing?audience=${audience}&interval=year${promoParam}#plans`} size="sm" variant={interval === "year" ? "primary" : "outline"}>Annual</ButtonLink>
                     <span className="text-xs text-ink-muted">Annual pays for {ANNUAL_MONTHS_PAID} months and covers 12.</span>
                   </div>
                 ) : null}
                 <form method="get" action="/app/billing" className="flex flex-wrap items-end gap-2">
                   <input type="hidden" name="interval" value={interval} />
+                  <input type="hidden" name="audience" value={audience} />
                   <div className="min-w-[12rem] flex-1">
                     <Field label="Promo code" htmlFor="promo"><Input id="promo" name="promo" defaultValue={promoCode} placeholder="Enter a code" autoComplete="off" /></Field>
                   </div>
@@ -170,13 +181,14 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
               </div>
             ) : null}
             <ul className="divide-y divide-mist">
-              {plans.map((p) => {
+              {plansAt(audience).map((p) => {
                 const percentOff = promoOk?.applies.has(p.id) ? promoOk.promo.percent_off : 0;
-                const shown = displayPrice(p, interval, percentOff);
-                const isCurrent = p.id === account.plan && paidUp;
-                const higher = planRank(p.id) > planRank(account.plan);
-                const lower = planRank(p.id) < planRank(account.plan);
-                const canSubscribe = !covered && p.id !== "custom" && (!paidUp || higher || (p.id === account.plan && Boolean(account.pendingPlan)));
+                const shown = displayPrice(p, interval, percentOff, audience);
+                const choice = { plan: p.id, audience };
+                const isCurrent = paidUp && p.id === account.plan && effectiveAudience(p.id, account.audience) === audience;
+                const higher = isLowerTarget(account, choice);
+                const lower = isLowerTarget(choice, account);
+                const canSubscribe = !covered && p.id !== "custom" && (!paidUp || higher || (isCurrent && Boolean(account.pendingPlan)));
                 return (
                   <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 text-sm sm:px-6">
                     <div>
@@ -191,13 +203,14 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
                         <span className="font-normal text-ink-muted">{p.id === "custom" ? "" : shown.period === "per year" ? "/ yr" : "/ mo"}</span>
                       </p>
                       {isCurrent ? <span className="text-xs font-semibold text-success">Current</span> : null}
-                      {account.pendingPlan === p.id ? <span className="text-xs font-semibold text-ink-muted">Starts {day(account.periodEnd)}</span> : null}
+                      {account.pendingPlan === p.id && (account.pendingAudience === null || account.pendingAudience === audience) ? <span className="text-xs font-semibold text-ink-muted">Starts {day(account.periodEnd)}</span> : null}
                       {p.id === "custom" ? <ButtonLink href="/contact" size="sm" variant="outline">Contact sales</ButtonLink> : null}
                       {canSubscribe ? (
                         providers.length > 0 ? (
                           providers.map((pr) => (
                             <form key={pr} action={startCheckoutAction}>
                               <input type="hidden" name="plan" value={p.id} />
+                              <input type="hidden" name="audience" value={audience} />
                               <input type="hidden" name="provider" value={pr} />
                               <input type="hidden" name="interval" value={interval} />
                               {promoOk?.applies.has(p.id) ? <input type="hidden" name="promo" value={promoCode} /> : null}
@@ -213,6 +226,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
                       {!covered && paidUp && lower && p.id !== "custom" && account.pendingPlan !== p.id ? (
                         <form action={scheduleDowngradeAction}>
                           <input type="hidden" name="plan" value={p.id} />
+                          <input type="hidden" name="audience" value={audience} />
                           <ActionButton size="sm" variant="outline">Switch at renewal</ActionButton>
                         </form>
                       ) : null}
