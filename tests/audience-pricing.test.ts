@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -88,4 +90,10 @@ test("the plan cards follow the audience", () => {
   assert.equal(displayPrice(at.pro, "year", 0, 50_000).price, "$11,655");
   assert.equal(displayPrice(at.pro, "month", 10, 50_000).price, "$1,048.95");
   assert.ok(!at.pro.features.some((f) => /twice/i.test(f)), "Pro no longer promises twice Growth's emails");
+});
+
+test("the sign-up migration accepts exactly the audience sizes on the slider", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/0020_signup_audience.sql"), "utf8");
+  const listed = /audience_steps constant integer\[\] := array\[([\d,\s]+)\]/.exec(sql)?.[1].split(",").map((v) => Number(v.trim()));
+  assert.deepEqual(listed, [...AUDIENCE_STEPS], "keep the list in 0020_signup_audience.sql equal to AUDIENCE_STEPS");
 });

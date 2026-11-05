@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { FAQ, PageIntro, Section } from "@/components/marketing/section";
 import { PricingExplorer } from "@/components/marketing/pricing-explorer";
 import { CtaBand } from "@/components/marketing/landing-sections";
-import { ANNUAL_BILLING_ENABLED, ANNUAL_MONTHS_PAID, planLimits } from "@/config/plan-limits";
-import { ButtonLink } from "@/components/ui/button";
+import { ANNUAL_BILLING_ENABLED, ANNUAL_MONTHS_PAID, DEFAULT_AUDIENCE, isAudienceStep, planLimits } from "@/config/plan-limits";
 import type { SearchParams } from "@/types";
 import { TRIAL_PROMISE } from "@/config/plans";
 
@@ -21,18 +20,13 @@ const faqs = [
 
 export default function PricingPage({ searchParams }: { searchParams: SearchParams }) {
   const interval = ANNUAL_BILLING_ENABLED && searchParams.billing === "year" ? "year" : "month";
+  const requested = Number(String(searchParams.audience ?? "").replace(/,/g, ""));
+  const audience = isAudienceStep(requested) ? requested : DEFAULT_AUDIENCE;
   return (
     <>
       <PageIntro title="One account. Multiple businesses. One subscription." description={`Manage several businesses from one login and one plan. Contacts and monthly emails are shared across your account, not repeated for every business. ${TRIAL_PROMISE}`} />
       <Section className="pt-6 sm:pt-10">
-        {ANNUAL_BILLING_ENABLED ? (
-          <div className="mb-8 flex flex-wrap items-center justify-center gap-3" role="group" aria-label="Billing interval">
-            <ButtonLink href="/pricing" size="sm" variant={interval === "month" ? "primary" : "outline"}>Monthly</ButtonLink>
-            <ButtonLink href="/pricing?billing=year" size="sm" variant={interval === "year" ? "primary" : "outline"}>Annual</ButtonLink>
-            <span className="text-sm text-ink-soft">Annual pays for {ANNUAL_MONTHS_PAID} months and covers 12.</span>
-          </div>
-        ) : null}
-        <PricingExplorer interval={interval} />
+        <PricingExplorer interval={interval} audience={audience} />
       </Section>
       <Section tone="tint">
         <div className="mb-10 text-center">

@@ -101,9 +101,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
   }
   const promoParam = promoCode ? `&promo=${encodeURIComponent(promoCode)}` : "";
 
-  // The audience size the plans are priced at: the one chosen on the slider, else the account's own (or the default while on a trial).
+  // The audience size the plans are priced at: the one chosen on the slider, else the account's own (the one it signed up or subscribed with), else the default.
   const requested = Number(String(searchParams.audience ?? "").replace(/,/g, ""));
-  const audience = isAudienceStep(requested) ? requested : paidUp ? nearestAudience(effectiveAudience(account.plan, account.audience)) : DEFAULT_AUDIENCE;
+  const audience = isAudienceStep(requested) ? requested : account.audience !== null ? nearestAudience(account.audience) : paidUp ? nearestAudience(effectiveAudience(account.plan, account.audience)) : DEFAULT_AUDIENCE;
 
   return (
     <>

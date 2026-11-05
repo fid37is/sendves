@@ -8,7 +8,6 @@ import { LaunchPad } from "@/components/marketing/launch-pad";
 import { StepsFlow } from "@/components/marketing/steps-flow";
 import { DeliverabilityChecks } from "@/components/marketing/deliverability-checks";
 import { SpotlightCard } from "@/components/marketing/spotlight-card";
-import { PlanCards } from "@/components/marketing/plan-cards";
 import { CountUp } from "@/components/motion/count-up";
 import { SpeedLines } from "@/components/motion/speed-lines";
 import { FlyingEnvelopes } from "@/components/motion/envelope";
@@ -196,12 +195,27 @@ export function Deliverability() {
   );
 }
 
+/** The home page only points at pricing. Prices and the audience slider live on /pricing, and the plan chosen there follows the person to sign-up. */
 export function PricingTeaser() {
+  const points = [
+    { icon: Mail, title: "Priced by audience size", text: "Pick how many contacts you have and every plan is priced to match. Pay for the audience you actually reach." },
+    { icon: Users, title: "One subscription, several businesses", text: "Run more than one brand from one login. Contacts and monthly emails are shared across your account." },
+    { icon: Check, title: `${planLimits.starter.trialDays}-day free trial on every plan`, text: "Start with the plan you pick. If you don’t subscribe by the end of the trial, sending pauses and your data stays safe." },
+  ];
   return (
-    <Section tone="tint">
-      <SectionHeading title="One account. Multiple businesses. One subscription." description="Every plan starts with a 14-day free trial. Contacts and monthly emails are shared across your account." />
-      <div className="mt-14">
-        <PlanCards />
+    <Section tone="tint" id="pricing">
+      <SectionHeading title="Pricing that grows with your audience" description="Choose your audience size on the pricing page, compare the plans and start your free trial with the one you pick." />
+      <div className="mt-14 grid gap-5 md:grid-cols-3">
+        {points.map(({ icon: Icon, title, text }) => (
+          <div key={title} className="flex flex-col rounded-3xl border border-mist bg-white p-7 transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl hover:shadow-brand-900/10">
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-50 text-brand-800"><Icon className="h-5 w-5" aria-hidden="true" /></span>
+            <h3 className="mt-5 text-lg font-bold text-ink">{title}</h3>
+            <p className="mt-2 text-sm text-ink-soft">{text}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-10 flex justify-center">
+        <ButtonLink href="/pricing" size="lg">See pricing and pick your plan</ButtonLink>
       </div>
     </Section>
   );

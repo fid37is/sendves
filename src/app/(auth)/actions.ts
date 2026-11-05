@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { env, isSupabaseConfigured } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { safeNext } from "@/lib/utils";
-import { isSelfServePlan } from "@/config/plan-limits";
+import { ANNUAL_BILLING_ENABLED, isAudienceStep, isSelfServePlan } from "@/config/plan-limits";
 import type { FormState } from "@/lib/auth/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendRecoveryEmail } from "@/server/team";
@@ -31,6 +31,9 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
   if (password !== confirm) return { error: "The passwords don’t match." };
   const plan = text(formData, "plan").toLowerCase();
   if (!isSelfServePlan(plan)) return { error: "Choose a plan to try." };
+  const audience = Number(text(formData, "audience").replace(/,/g, ""));
+  if (!isAudienceStep(audience)) return { error: "Choose an audience size for your plan." };
+  const interval = ANNUAL_BILLING_ENABLED && text(formData, "interval") === "year" ? "year" : "month";
   if (!isSupabaseConfigured) return { error: NOT_CONFIGURED };
 
   // Platform sign-up rules, set by an admin: registration can be closed, and some domains blocked.
@@ -47,7 +50,7 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
     password,
     options: {
       // Creating the account is the acceptance. The timestamp is kept as proof of when.
-      data: { full_name: fullName, plan, terms_accepted_at: new Date().toISOString() },
+      data: { full_name: fullName, plan, audience, interval, terms_accepted_at: new Date().toISOString() },
       // No query string: Supabase only honours redirect URLs that match its allow-list exactly, and the callback defaults to /app.
       emailRedirectTo: `${env.siteUrl}/auth/callback`,
     },
