@@ -5,16 +5,24 @@ import { canAccessDepartment, canAssignDepartment, type Access } from "@/lib/acc
 import { requireWorkspace } from "@/lib/workspace";
 import { checkEmail } from "@/lib/validation/email";
 import { parseContactsCsv } from "@/server/imports";
+import { getAccountUsage } from "@/server/usage";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Most contacts one bulk action can touch (the table shows 25 per page). */
 const MAX_SELECTION = 100;
 
+/**
+ * Contacts are POOLED across every business on the account, so room comes from the shared usage service, not from this
+ * business alone. A business may also hold a hard allocation inside the pool. `reason` says which limit was hit.
+ */
 async function remainingRoom(ctx: Awaited<ReturnType<typeof requireWorkspace>>) {
-  const { count } = await ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id);
-  const cap = ctx.workspace.max_contacts; // the workspace's own limit: seeded from the plan, adjustable by an admin
-  return { used: count ?? 0, room: Math.max(0, cap - (count ?? 0)), cap };
+  const usage = await getAccountUsage(ctx.db, ctx.workspace.id);
+  if (!usage) return { used: 0, room: 0, cap: 0, reason: "Couldn’t check your plan limits. Try again in a moment." };
+  const reason = usage.remaining.contacts <= 0
+    ? `Your account has used all ${usage.limits.contacts.toLocaleString("en-US")} of its contacts, shared by all your businesses. Upgrade your plan to add more.`
+    : `This business has used the ${(usage.self.contactCap ?? 0).toLocaleString("en-US")} contacts allocated to it. Raise its allocation in Billing to add more.`;
+  return { used: usage.contactsUsed, room: usage.room.contacts, cap: usage.limits.contacts, reason };
 }
 
 export type AddContactsInput = {
@@ -98,8 +106,8 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
     return fail(rowErrors.length ? "Fix the highlighted rows and try again." : "Add at least one email address.");
   }
 
-  const { room } = await remainingRoom(ctx);
-  if (room <= 0) return fail("You’ve reached your contact limit. Upgrade your plan to add more.");
+  const { room, reason } = await remainingRoom(ctx);
+  if (room <= 0) return fail(reason);
 
   const emails = candidates.map((c) => c.email);
   const [{ data: blocked }, { data: existing }] = await Promise.all([
@@ -135,7 +143,7 @@ export async function addContactsAction(input: AddContactsInput): Promise<AddCon
         source: withAudience ? "campaign audience" : "manual", consented_at: now,
       })),
     ).select("id");
-    if (error) return fail(error.code === "23505" ? "Some of these contacts already exist. Review them and try again." : "Couldn’t add the contacts. Try again.");
+    if (error) return fail(error.message?.includes("contact_pool_exceeded") ? "Your shared contact limit was reached while saving. Upgrade your plan to add more." : error.code === "23505" ? "Some of these contacts already exist. Review them and try again." : "Couldn’t add the contacts. Try again.");
     insertedIds = inserted ?? [];
   }
 
@@ -176,8 +184,8 @@ export async function importContactsAction(formData: FormData): Promise<ImportCo
   const parsed = parseContactsCsv(await file.text());
   if (parsed.error) return { ok: false, error: parsed.error };
 
-  const { room } = await remainingRoom(ctx);
-  if (room <= 0) return { ok: false, error: "You’ve reached your contact limit. Upgrade your plan to import more." };
+  const { room, reason } = await remainingRoom(ctx);
+  if (room <= 0) return { ok: false, error: reason };
   let rows = parsed.rows;
   const truncated = Math.max(0, rows.length - room);
   rows = rows.slice(0, room);
@@ -202,6 +210,7 @@ export async function importContactsAction(formData: FormData): Promise<ImportCo
 
   let added = 0;
   let suppressed = 0;
+  let hitPool = false;
   for (let i = 0; i < rows.length; i += 500) {
     let chunk = rows.slice(i, i + 500);
     const { data: blocked } = await ctx.db.from("suppression_entries").select("email").or(`workspace_id.is.null,workspace_id.eq.${ctx.workspace.id}`).in("email", chunk.map((r) => r.email));
@@ -211,9 +220,11 @@ export async function importContactsAction(formData: FormData): Promise<ImportCo
     if (chunk.length === 0) continue;
 
     const now = new Date().toISOString();
-    const { data: inserted } = await ctx.db.from("contacts")
+    const { data: inserted, error: insertError } = await ctx.db.from("contacts")
       .upsert(chunk.map((r) => ({ workspace_id: ctx.workspace.id, email: r.email, first_name: r.first_name, last_name: r.last_name, custom_fields: r.custom, source: "csv import", consented_at: now })), { onConflict: "workspace_id,email", ignoreDuplicates: true })
       .select("id");
+    // Another import may have used the last of the shared pool a moment ago. The database guard refuses the batch.
+    if (insertError?.message?.includes("contact_pool_exceeded")) { hitPool = true; break; }
     added += inserted?.length ?? 0;
 
     if (listId) {
@@ -223,6 +234,7 @@ export async function importContactsAction(formData: FormData): Promise<ImportCo
   }
 
   const notes = [
+    hitPool ? "stopped early: your shared contact limit was reached" : "",
     `${added.toLocaleString("en-US")} new contacts imported`,
     rows.length - added - suppressed > 0 ? `${(rows.length - added - suppressed).toLocaleString("en-US")} already existed` : "",
     parsed.invalid ? `${parsed.invalid} invalid` : "",

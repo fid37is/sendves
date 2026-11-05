@@ -10,7 +10,8 @@ import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 import { requireAdminDb } from "@/lib/auth/admin";
 import { auditDetails, auditTarget } from "@/lib/audit-format";
 import { dnsRecordsFor } from "@/server/sending/domains";
-import { limitsFor } from "@/config/plan-limits";
+import { resolveEntitlements } from "@/config/plan-limits";
+import { getAccountUsage } from "@/server/usage";
 import { getDailyActivity, getTopLinks, pct, ratio, sumDays, type RangeDays } from "@/lib/analytics";
 import { sanitizeBlocks } from "@/lib/email/sanitize";
 import type { Block } from "@/lib/email/blocks";
@@ -18,11 +19,6 @@ import type { CampaignStatus, ContactStatus, WorkspaceStatus } from "@/types";
 
 const fmt = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "-";
-
-function monthStart(): string {
-  const d = new Date();
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
-}
 
 export type CampaignRow = {
   id: string; name: string; subject: string; status: CampaignStatus; audience: string; date: string; reviewStatus?: string;
@@ -46,7 +42,7 @@ export type DomainRow = {
   records: { purpose: string; type: string; host: string; value: string; status: string }[];
 };
 
-const EMPTY_WORKSPACE = { name: "My workspace", plan: "Free", contactsUsed: 0, contactsLimit: 500, sendsUsed: 0, sendsLimit: 2000, dailyLimit: 200 };
+const EMPTY_WORKSPACE = { name: "My workspace", plan: "Starter", contactsUsed: 0, contactsLimit: 5000, sendsUsed: 0, sendsLimit: 60000, dailyLimit: 200 };
 
 // ── Dashboard ─────────────────────────────────────────────────────
 
@@ -94,11 +90,10 @@ export async function getOverview(ctx: Ctx | null) {
   if (!ctx?.db || !ctx.workspace) return empty;
   const ws = ctx.workspace;
   const db = ctx.db;
-  const limits = limitsFor(ws.plan);
-
-  const [{ count: contacts }, { count: sends }, { count: domains }, { count: sentCampaigns }, campaigns, orgSeries, orgLinks] = await Promise.all([
+  const [{ count: contacts }, usage, { count: domains }, { count: sentCampaigns }, campaigns, orgSeries, orgLinks] = await Promise.all([
     db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id),
-    db.from("sends").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).gte("sent_at", monthStart()),
+    // Contacts and emails are pooled across the account's businesses, counted from the billing period start.
+    getAccountUsage(db, ws.id),
     db.from("sending_domains").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).eq("status", "verified"),
     db.from("campaigns").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).in("status", ["sending", "sent"]),
     getCampaigns(ctx, 5),
@@ -118,7 +113,7 @@ export async function getOverview(ctx: Ctx | null) {
 
   const totals = sumDays(series);
   return {
-    workspace: { name: ws.name, plan: ws.plan.charAt(0).toUpperCase() + ws.plan.slice(1), contactsUsed: contacts ?? 0, contactsLimit: ws.max_contacts, sendsUsed: sends ?? 0, sendsLimit: limits.monthlySends, dailyLimit: ws.daily_send_limit },
+    workspace: { name: ws.name, plan: ws.plan.charAt(0).toUpperCase() + ws.plan.slice(1), contactsUsed: usage?.contactsUsed ?? contacts ?? 0, contactsLimit: usage?.limits.contacts ?? 0, sendsUsed: usage?.emailsSent ?? 0, sendsLimit: usage?.limits.emails ?? 0, dailyLimit: ws.daily_send_limit },
     checklist: [true, Boolean(ws.business_address), (domains ?? 0) > 0, (contacts ?? 0) > 0, (sentCampaigns ?? 0) > 0],
     recent: campaigns,
     series, totals, links,
@@ -778,14 +773,29 @@ export async function getAdminWorkspaceDetail(id: string) {
   const campaignIds = (campaigns ?? []).map((c: any) => c.id as string);
   const { data: cstats } = campaignIds.length ? await db.from("campaign_stats").select("campaign_id, sent, delivered, bounced, complained, clicks").in("campaign_id", campaignIds) : { data: [] as any[] };
   const cs = new Map((cstats ?? []).map((r: any) => [r.campaign_id, r]));
+  const acct = await getAccountUsage(db, id);
   const sent30 = Number(stats?.sent_30d ?? 0);
   const complaints30 = Number(stats?.complaints_30d ?? 0);
   const totals = series.reduce((t, d) => ({ delivered: t.delivered + d.delivered, bounced: t.bounced + d.bounced, opens: t.opens + d.opens, clicks: t.clicks + d.uniqueClicks }), { delivered: 0, bounced: 0, opens: 0, clicks: 0 });
   return {
     id: w.id as string, name: w.name as string, plan: String(w.plan), status: w.status as WorkspaceStatus, created: fmt(w.created_at),
-    timezone: (w.timezone as string) || "UTC", address: (w.business_address as string) || "", dailyLimit: Number(w.daily_send_limit), maxContacts: Number(w.max_contacts),
-    planLimits: limitsFor(String(w.plan)),
-    billing: { provider: (w.billing_provider as string | null) || "", subscribed: Boolean(w.billing_ref) },
+    timezone: (w.timezone as string) || "UTC", address: (w.business_address as string) || "", dailyLimit: Number(w.daily_send_limit),
+    // Account-level entitlements of the account this business belongs to (the main business carries the subscription).
+    planLimits: resolveEntitlements(String(w.plan), w.entitlement_overrides, w.audience_contacts),
+    isMain: !w.account_workspace_id,
+    accountUsage: acct ? {
+      contactsUsed: acct.contactsUsed, contactsLimit: acct.limits.contacts, emailsSent: acct.emailsSent, emailsLimit: acct.limits.emails,
+      businessCount: acct.businessCount, businessLimit: acct.limits.businesses, windowStart: fmt(acct.window.start.toISOString()), windowEnd: fmt(acct.window.end.toISOString()),
+      perBusiness: acct.perBusiness.map((b) => ({ id: b.id, name: b.name, contacts: b.contacts, emails: b.emails, contactCap: b.contactCap, emailCap: b.emailCap })),
+    } : null,
+    billing: {
+      provider: (w.billing_provider as string | null) || "",
+      subscribed: w.subscription_status === "active" || w.subscription_status === "past_due",
+      status: String(w.subscription_status ?? "trialing"),
+      trialEndsAt: w.trial_ends_at ? fmt(w.trial_ends_at) : "",
+      periodEnd: w.billing_period_end ? fmt(w.billing_period_end) : "",
+      overrides: (w.entitlement_overrides && typeof w.entitlement_overrides === "object" ? w.entitlement_overrides : {}) as Record<string, number>,
+    },
     owner: owner ? { id: owner.id as string, name: (owner.full_name as string) || "-", email: (owner.email as string) || "-" } : null,
     members: ((members ?? []) as any[]).map((m) => {
       const p: any = pmap.get(m.user_id);

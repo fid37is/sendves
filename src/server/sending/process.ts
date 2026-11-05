@@ -7,6 +7,7 @@ import { getProvider, PermanentSendError, type MailProvider } from "./providers"
 import { buildEmail } from "./render";
 import { sentToday as sentTodayCount } from "@/server/inbox/outbound";
 import { sendDueEmails } from "@/server/inbox/scheduled";
+import { getAccountUsage } from "@/server/usage";
 
 const MAX_ATTEMPTS = 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -34,7 +35,7 @@ async function cached<T>(map: Map<string, T>, key: string, load: () => Promise<T
 /** Turns due, approved campaigns into queued sends. */
 async function activateScheduled(db: Db): Promise<number> {
   const { data: due } = await db
-    .from("campaigns").select("id, workspace_id")
+    .from("campaigns").select("id, workspace_id, recipient_count")
     .eq("status", "scheduled").lte("scheduled_at", new Date().toISOString())
     .in("review_status", ["not_required", "approved"]).limit(50);
 
@@ -42,6 +43,16 @@ async function activateScheduled(db: Db): Promise<number> {
   for (const c of due ?? []) {
     const { data: ws } = await db.from("workspaces").select("status").eq("id", c.workspace_id).maybeSingle();
     if (!ws || ws.status === "suspended") continue;
+    // A campaign scheduled earlier may now be blocked: the trial ended, a payment failed, or other businesses used the shared pool.
+    const usage = await getAccountUsage(db, c.workspace_id);
+    const hold = !usage ? "We couldn’t check your plan limits. It will be retried."
+      : !usage.access.sending ? (usage.access.reason ?? "Your subscription doesn’t allow sending right now.")
+      : usage.emailsSent + Number(c.recipient_count ?? 0) > usage.limits.emails ? "This campaign would go over your shared email allowance for this period. Upgrade your plan or reduce the audience, then send again."
+      : null;
+    if (hold) {
+      if (usage) await db.from("campaigns").update({ status: "paused", pause_reason: hold }).eq("id", c.id).eq("status", "scheduled");
+      continue;
+    }
     await db.rpc("enqueue_campaign", { p_campaign: c.id });
     n++;
   }

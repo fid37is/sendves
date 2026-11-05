@@ -76,11 +76,11 @@ export function SiteHeader() {
 
         <div className="hidden items-center gap-3 lg:flex">
           <ButtonLink href="/login" variant="ghost">Log in</ButtonLink>
-          <ButtonLink href="/register">Start free</ButtonLink>
+          <ButtonLink href="/register">Start free trial</ButtonLink>
         </div>
 
         <div className="flex items-center gap-2 lg:hidden">
-          <ButtonLink href="/register" size="sm">Start free</ButtonLink>
+          <ButtonLink href="/register" size="sm">Start free trial</ButtonLink>
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -132,7 +132,7 @@ export function SiteHeader() {
             </nav>
             <div className="space-y-3 border-t border-mist p-5">
               <ButtonLink href="/login" variant="outline" size="lg" className="w-full">Log in</ButtonLink>
-              <ButtonLink href="/register" size="lg" className="w-full">Start with free plan</ButtonLink>
+              <ButtonLink href="/register" size="lg" className="w-full">Start your free trial</ButtonLink>
             </div>
           </div>
         </div>

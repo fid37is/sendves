@@ -1,4 +1,5 @@
 import "server-only";
+import { getAccountUsage } from "@/server/usage";
 import { inScope } from "@/server/scope";
 import type { Access } from "@/lib/access";
 import type { Db } from "@/lib/supabase/admin";
@@ -17,7 +18,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export type AudienceSelection = { mode: "all" | "custom"; listIds: string[]; contactIds: string[] };
 
-type Owner = { db: Db; workspace: { id: string; plan: string; max_contacts: number }; access: Access | null };
+type Owner = { db: Db; workspace: { id: string; plan: string }; access: Access | null };
 
 const uniqueIds = (v: unknown, max: number): string[] =>
   Array.isArray(v) ? [...new Set(v.map(String).filter((id) => UUID_RE.test(id)))].slice(0, max) : [];
@@ -168,8 +169,9 @@ export async function ingestContacts(
     for (const b of (sup ?? []) as any[]) blocked.add(String(b.email).toLowerCase());
   }
 
-  const { count } = await ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id);
-  let room = Math.max(0, ctx.workspace.max_contacts - (count ?? 0));
+  // Contacts are pooled across the account's businesses, so room comes from the shared usage service.
+  const usage = await getAccountUsage(ctx.db, ctx.workspace.id);
+  let room = usage?.room.contacts ?? 0;
 
   const name = (a: string | null | undefined, b: string | null | undefined) => [a, b].filter(Boolean).join(" ");
   const toCreate: IngestRow[] = [];
@@ -180,7 +182,7 @@ export async function ingestContacts(
       if (k.status === "subscribed") { result.contacts.push({ id: k.id, email: v.email, name: name(k.first_name, k.last_name) }); result.alreadyInContacts++; }
       else skip(v.email, `Already in your contacts as ${k.status}, so it can’t be emailed.`);
     } else if (!opts.canCreate) skip(v.email, "Not in your contacts yet, and you don’t have permission to add new contacts.");
-    else if (room <= 0) skip(v.email, "Your plan’s contact limit was reached.");
+    else if (room <= 0) skip(v.email, "Your shared contact limit was reached.");
     else { toCreate.push(v); room--; }
   }
 
@@ -194,7 +196,10 @@ export async function ingestContacts(
           custom_fields: r.custom ?? {}, source: opts.source, consented_at: now,
         })), { onConflict: "workspace_id,email", ignoreDuplicates: true })
         .select("id, email, first_name, last_name");
-      if (error) return { ...result, ok: false, error: "Couldn’t save the new contacts. Try again.", message: "Couldn’t save the new contacts. Try again." };
+      if (error) {
+        const msg = error.message?.includes("contact_pool_exceeded") ? "Your shared contact limit was reached while saving. Upgrade your plan to add more." : "Couldn’t save the new contacts. Try again.";
+        return { ...result, ok: false, error: msg, message: msg };
+      }
       for (const c of (inserted ?? []) as any[]) {
         result.created++;
         result.contacts.push({ id: c.id, email: c.email, name: name(c.first_name, c.last_name) });

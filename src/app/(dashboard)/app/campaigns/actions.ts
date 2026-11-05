@@ -2,7 +2,6 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { limitsFor } from "@/config/plan-limits";
 import { can, NO_PERMISSION, type Permission } from "@/lib/access";
 import { canAccessDepartment } from "@/lib/access";
 import { renderCampaignHtml, reviewChecks, sanitizeDesign, sanitizeLogo, type Design, type Logo } from "@/lib/email/campaign";
@@ -10,6 +9,7 @@ import { sanitizeVariables, type VariableDef } from "@/lib/email/variables";
 import { getAudienceOptions } from "@/lib/queries";
 import { go } from "@/lib/flash";
 import { getContext, requireWorkspace } from "@/lib/workspace";
+import { getAccountUsage } from "@/server/usage";
 import { audienceSize, parseSelection, saveAudience, type AudienceSelection } from "@/server/audience";
 import { assetRule, getEmailLogo, saveEmailLogo } from "@/server/email-assets";
 import { checkSender } from "@/server/senders";
@@ -196,10 +196,20 @@ export async function submitCampaignAction(input: SubmitInput): Promise<SubmitRe
   });
   for (const k of checks) if (!k.ok && k.problem) problems.push(k.problem);
 
-  const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString();
-  const { count: usedThisMonth } = await ctx.db.from("sends").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id).gte("created_at", monthStart);
-  const monthly = limitsFor(ctx.workspace.plan).monthlySends;
-  if ((usedThisMonth ?? 0) + recipients > monthly) problems.push(`stay within your monthly limit of ${monthly.toLocaleString("en-US")} emails (this would use ${((usedThisMonth ?? 0) + recipients).toLocaleString("en-US")})`);
+  // Emails are POOLED across every business on the account and counted from the subscription's billing period start.
+  // Trial and payment state come from the same service, so an ended trial or a failed payment stops sending here.
+  const usage = await getAccountUsage(ctx.db, ctx.workspace.id);
+  if (!usage) problems.push("wait a moment and try again (we couldn’t check your plan limits)");
+  else {
+    if (!usage.access.sending) return { ok: false, error: usage.access.reason ?? "Your subscription doesn’t allow sending right now." };
+    const fmt = (n: number) => n.toLocaleString("en-US");
+    if (usage.emailsSent + recipients > usage.limits.emails) {
+      const shared = usage.businessCount > 1 ? ", shared by all your businesses" : "";
+      problems.push(`stay within your ${usage.account.status === "trialing" ? "trial" : "monthly"} limit of ${fmt(usage.limits.emails)} emails${shared} (this would use ${fmt(usage.emailsSent + recipients)})`);
+    } else if (usage.self.capMode === "hard" && usage.self.emailCap !== null && usage.self.emails + recipients > usage.self.emailCap) {
+      problems.push(`stay within the ${fmt(usage.self.emailCap)} emails allocated to this business (this would use ${fmt(usage.self.emails + recipients)}). Raise its allocation in Billing`);
+    }
+  }
 
   let when = new Date();
   if (input.mode === "later") {

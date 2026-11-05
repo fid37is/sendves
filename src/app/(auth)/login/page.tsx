@@ -17,7 +17,7 @@ export default function LoginPage({ searchParams }: { searchParams: { next?: str
       <p className="mb-8 mt-2 text-ink-soft">Log in to manage your campaigns.</p>
       <LoginForm next={safeNext(searchParams.next)} notice={searchParams.error ? notices[searchParams.error] : undefined} />
       <p className="mt-8 text-center text-sm text-ink-soft">
-        New to Sendves? <Link href="/register" className="font-semibold text-brand-800 hover:underline">Create a free account</Link>
+        New to Sendves? <Link href="/register" className="font-semibold text-brand-800 hover:underline">Start your free trial</Link>
       </p>
     </>
   );

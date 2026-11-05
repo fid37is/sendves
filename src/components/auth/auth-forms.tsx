@@ -5,6 +5,7 @@ import { useFormState } from "react-dom";
 import { forgotPasswordAction, resetPasswordAction, signInAction, signUpAction } from "@/app/(auth)/actions";
 import { acceptInviteAction } from "@/app/(auth)/invite/[token]/actions";
 import { initialFormState } from "@/lib/auth/types";
+import type { PlanSelection } from "@/components/auth/selected-plan";
 import { Field, Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -30,11 +31,15 @@ export function LoginForm({ next, notice }: { next?: string; notice?: string }) 
   );
 }
 
-export function RegisterForm() {
+export function RegisterForm({ selection }: { selection: PlanSelection }) {
   const [state, action] = useFormState(signUpAction, initialFormState);
   useActionToast(state);
   return (
     <form action={action} className="space-y-5">
+      {/* The plan shown above the form travels with it. The server checks every value again. */}
+      <input type="hidden" name="plan" value={selection.plan} />
+      <input type="hidden" name="audience" value={selection.audience} />
+      <input type="hidden" name="interval" value={selection.interval} />
       <Field label="Full name" htmlFor="fullName"><Input id="fullName" name="fullName" autoComplete="name" required /></Field>
       <Field label="Email address" htmlFor="email" hint="Use an email you already have and can access. We use it to sign you in and to recover your account.">
         <Input id="email" name="email" type="email" autoComplete="email" required />
@@ -49,7 +54,7 @@ export function RegisterForm() {
         <label htmlFor="company">Company</label>
         <input id="company" name="company" tabIndex={-1} autoComplete="off" />
       </div>
-      <SubmitButton pendingText="Creating account…">Create free account</SubmitButton>
+      <SubmitButton pendingText="Creating account…">Start free trial</SubmitButton>
       <p className="text-center text-xs leading-relaxed text-ink-muted">
         By creating an account, you agree to our{" "}
         <Link href="/terms-of-service" className="font-semibold text-brand-800 hover:underline">Terms of Service</Link>,{" "}

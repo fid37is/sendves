@@ -1,7 +1,7 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { limitsFor } from "@/config/plan-limits";
+import { planName } from "@/config/plans";
 import { go } from "@/lib/flash";
 import { ACTIVE_WORKSPACE_COOKIE, getContext } from "@/lib/workspace";
 import { recordAudit } from "@/server/audit";
@@ -26,29 +26,40 @@ export async function createBusinessAction(formData: FormData) {
   const quota = await getBusinessQuota(db, ctx.user.id);
   if (!quota) go("/app", "err", "Only the owner of a business can add another one.");
   if (quota.main.status === "suspended") go(BACK, "err", "Your account is suspended. Contact support before adding a business.");
+  // New paid actions need a live trial or an active subscription. Nothing already created is touched.
+  if (!quota.access.sending) go(BACK, "err", quota.access.reason ?? "Your subscription doesn’t allow this right now.");
   if (quota.used >= quota.cap) {
-    const plan = quota.main.plan;
-    go(BACK, "err", `Your ${plan} plan covers ${quota.cap} ${quota.cap === 1 ? "business" : "businesses"}. Upgrade your plan to add another.`);
+    // The same subscription is upgraded to the next plan that fits; a second subscription is never created.
+    const next = quota.nextPlan;
+    go(BACK, "err", next && next !== "custom"
+      ? `Your ${planName(quota.main.plan)} plan covers ${quota.cap} ${quota.cap === 1 ? "business" : "businesses"}. Upgrade to ${planName(next)} to add another.`
+      : `Your ${planName(quota.main.plan)} plan covers ${quota.cap} businesses. Contact sales for a Custom plan to add more.`);
   }
 
   const { data: same } = await db.from("workspaces").select("id").eq("owner_id", ctx.user.id).ilike("name", name.replace(/[%_\\]/g, "\\$&")).limit(1);
   if (same?.length) go(BACK, "err", "You already have a business with that name.");
 
-  const limits = limitsFor(quota.main.plan);
   const { data: created, error } = await db.from("workspaces").insert({
     name,
     owner_id: ctx.user.id,
+    // Only the plan NAME is copied: per-business limits (daily send limit, domains) are read from it. Pooled limits stay on the account.
     plan: quota.main.plan,
     // A business added to an account that is already approved to send is approved; otherwise it follows the main one.
     status: quota.main.status === "active" ? "active" : "review",
     timezone: quota.main.timezone,
-    max_contacts: limits.contacts,
-    daily_send_limit: limits.startDaily,
+    daily_send_limit: quota.account.limits.startDaily,
     account_workspace_id: quota.main.id,
   }).select("id").single();
   if (error || !created) {
     console.error("[businesses] create failed:", error?.message);
     go(BACK, "err", "Couldn’t create the business. Try again in a moment.");
+  }
+
+  // Two people adding at the same moment could both pass the check above. Count again, and back out if over.
+  const after = await getBusinessQuota(db, ctx.user.id);
+  if (after && after.used > after.cap) {
+    await db.from("workspaces").delete().eq("id", created.id);
+    go(BACK, "err", `Your ${planName(quota.main.plan)} plan covers ${after.cap} ${after.cap === 1 ? "business" : "businesses"}. Upgrade to add another.`);
   }
 
   const { error: memberError } = await db.from("workspace_members").insert({ workspace_id: created.id, user_id: ctx.user.id, role: "owner" });

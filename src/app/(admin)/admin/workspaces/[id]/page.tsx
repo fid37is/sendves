@@ -106,7 +106,7 @@ export default async function AdminWorkspacePage({ params, searchParams }: { par
             <StatCard label="Delivered" value={a.deliveredRate} note={`${formatNumber(a.delivered)} emails`} />
             <StatCard label="Bounce rate" value={a.bounceRate} status={health(ratio(a.bounced, a.sent30), settings.pause_bounce_pct)} note={`Campaigns pause at ${settings.pause_bounce_pct}%`} />
             <StatCard label="Complaint rate" value={a.complaintRate} status={health(ratio(a.complaints30, a.sent30), settings.pause_complaint_pct)} note={`Pause at ${settings.pause_complaint_pct}% · suspend at ${settings.suspend_complaint_pct}%`} />
-            <StatCard label="Contacts" value={formatNumber(w.counts.contacts)} progress={Math.min(1, w.counts.contacts / Math.max(1, w.maxContacts))} note={`${formatNumber(w.counts.subscribed)} subscribed · limit ${formatNumber(w.maxContacts)}`} />
+            <StatCard label="Contacts" value={formatNumber(w.counts.contacts)} progress={Math.min(1, (w.accountUsage?.contactsUsed ?? w.counts.contacts) / Math.max(1, w.planLimits.contacts))} note={`${formatNumber(w.counts.subscribed)} subscribed · account pool ${formatNumber(w.accountUsage?.contactsUsed ?? w.counts.contacts)} of ${formatNumber(w.planLimits.contacts)}`} />
             <StatCard label="Lists" value={formatNumber(w.counts.lists)} />
             <StatCard label="Team" value={formatNumber(w.members.length)} note={w.counts.invites ? `${w.counts.invites} invitation${w.counts.invites === 1 ? "" : "s"} pending` : "No pending invitations"} />
             <StatCard label="Sender addresses" value={formatNumber(w.counts.senders)} note={`${w.domains.filter((d) => d.status === "verified").length} of ${w.domains.length} domains verified`} />
@@ -237,26 +237,58 @@ export default async function AdminWorkspacePage({ params, searchParams }: { par
       {tab === "limits" ? (
         <div className="grid max-w-2xl gap-6">
           <Card>
-            <CardHeader title="Subscription" description="The plan comes from the customer’s subscription, not from the console." />
+            <CardHeader title="Subscription" description="One subscription per account. The plan comes from the customer’s payments, not from the console." />
             <FactList
               items={[
                 { label: "Plan", value: planName },
-                { label: "Billing", value: w.billing.subscribed ? `Active subscription via ${w.billing.provider || "billing provider"}` : "No subscription (free plan)" },
+                { label: "Status", value: w.billing.status.replace("_", " ") },
+                { label: "Billing", value: w.billing.subscribed ? `Paid via ${w.billing.provider || "billing provider"}${w.billing.periodEnd ? `, period ends ${w.billing.periodEnd}` : ""}` : w.billing.status === "trialing" ? `Free trial${w.billing.trialEndsAt ? `, ends ${w.billing.trialEndsAt}` : ""}` : "No active subscription" },
+                ...(!w.isMain ? [{ label: "Covered by", value: "The subscription on the account’s main business" }] : []),
               ]}
             />
             <p className="border-t border-mist px-6 py-4 text-sm text-ink-muted">To change a plan, the customer upgrades or cancels from their Billing page. Billing then sets the plan and its limits automatically.</p>
           </Card>
+          {w.accountUsage ? (
+            <Card>
+              <CardHeader title="Account usage" description={`Pooled across the account’s ${w.accountUsage.businessCount} ${w.accountUsage.businessCount === 1 ? "business" : "businesses"}, counted ${w.accountUsage.windowStart} to ${w.accountUsage.windowEnd}.`} />
+              <FactList
+                items={[
+                  { label: "Contacts", value: `${formatNumber(w.accountUsage.contactsUsed)} of ${formatNumber(w.accountUsage.contactsLimit)}` },
+                  { label: "Emails this period", value: `${formatNumber(w.accountUsage.emailsSent)} of ${formatNumber(w.accountUsage.emailsLimit)}` },
+                  { label: "Businesses", value: `${w.accountUsage.businessCount} of ${w.accountUsage.businessLimit}` },
+                ]}
+              />
+              <ul className="divide-y divide-mist border-t border-mist text-sm">
+                {w.accountUsage.perBusiness.map((b) => (
+                  <li key={b.id} className="flex flex-wrap justify-between gap-2 px-6 py-3">
+                    <span className="font-medium text-ink">{b.name}</span>
+                    <span className="text-ink-muted">{formatNumber(b.contacts)} contacts, {formatNumber(b.emails)} emails{b.contactCap !== null || b.emailCap !== null ? " (allocated)" : ""}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
           <Card>
-            <CardHeader title="Limit overrides" description={`Plan defaults: ${formatNumber(w.planLimits.maxDaily)} emails per day, ${formatNumber(w.planLimits.contacts)} contacts. An override lasts until the subscription changes.`} />
+            <CardHeader title="Limit overrides" description={`Plan defaults: ${formatNumber(w.planLimits.contacts)} pooled contacts, ${formatNumber(w.planLimits.monthlySends)} pooled emails a period, ${w.planLimits.businesses} businesses. Overrides are stored once on the account.`} />
             <form action={updateWorkspaceLimitsAction} className="grid gap-5 p-6 sm:grid-cols-2">
               <input type="hidden" name="id" value={w.id} />
               <input type="hidden" name="back" value="detail" />
-              <Field label="Daily send limit" htmlFor="daily" hint="Emails this workspace may send per day.">
+              <Field label="Daily send limit" htmlFor="daily" hint="Emails this one business may send per day.">
                 <Input id="daily" name="daily" type="number" min={1} max={1000000} defaultValue={w.dailyLimit} required />
               </Field>
-              <Field label="Contact limit" htmlFor="contacts" hint="People it can store across all lists.">
-                <Input id="contacts" name="contacts" type="number" min={1} max={10000000} defaultValue={w.maxContacts} required />
-              </Field>
+              {w.isMain ? (
+                <>
+                  <Field label="Pooled contacts" htmlFor="contacts" hint="Account-wide. Empty uses the plan.">
+                    <Input id="contacts" name="contacts" type="number" min={0} max={10000000} defaultValue={w.billing.overrides.contacts ?? ""} placeholder={String(w.planLimits.contacts)} />
+                  </Field>
+                  <Field label="Pooled emails per period" htmlFor="emails" hint="Account-wide. Empty uses the plan.">
+                    <Input id="emails" name="emails" type="number" min={0} max={100000000} defaultValue={w.billing.overrides.monthlySends ?? ""} placeholder={String(w.planLimits.monthlySends)} />
+                  </Field>
+                  <Field label="Business workspaces" htmlFor="businesses" hint="Account-wide. Empty uses the plan.">
+                    <Input id="businesses" name="businesses" type="number" min={0} max={100} defaultValue={w.billing.overrides.businesses ?? ""} placeholder={String(w.planLimits.businesses)} />
+                  </Field>
+                </>
+              ) : <p className="self-end text-sm text-ink-muted sm:col-span-1">Pooled limits are set on the account’s main business.</p>}
               <div className="flex justify-end sm:col-span-2"><ActionButton requireChange>Save limits</ActionButton></div>
             </form>
           </Card>
