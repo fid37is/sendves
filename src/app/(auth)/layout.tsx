@@ -19,7 +19,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <h2 className="animate-rise text-4xl font-extrabold leading-tight" style={{ animationDelay: "0.1s" }}>Email that moves with you.</h2>
           <p className="animate-rise mt-4 text-accent-100" style={{ animationDelay: "0.2s" }}>Send campaigns your audience wants, with the protection your sender reputation needs.</p>
           <ul className="mt-8 space-y-4">
-            {["Free plan, no credit card", "Guided domain authentication", "Unsubscribe and bounce handling built in"].map((t, i) => (
+            {["14-day free trial on every plan", "Guided domain authentication", "Unsubscribe and bounce handling built in"].map((t, i) => (
               <li key={t} className="animate-rise flex items-center gap-3 text-accent-100" style={{ animationDelay: `${0.35 + i * 0.12}s` }}>
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-400">
                   <Check className="h-4 w-4 text-brand-900" aria-hidden="true" />

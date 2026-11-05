@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/server";
 import { sendAdminInviteEmail } from "@/server/team";
 import { requireAdminDb } from "@/lib/auth/admin";
 import { recordAudit } from "@/server/audit";
+import { normalizePromoCode } from "@/lib/promo";
+import { syncEntitlements } from "@/server/usage";
 
 const UUID = /^[0-9a-f-]{36}$/i;
 const id = (f: FormData) => {
@@ -73,23 +75,44 @@ export async function setWorkspaceStatusAction(formData: FormData) {
 }
 
 /**
- * Limit overrides only. The plan itself comes from the customer's subscription (billing webhooks set
- * it), so admins can't grant or change it here; an override lasts until the subscription changes.
+ * Admin limit controls. The plan itself comes from the customer's subscription (billing events set it), so admins can't
+ * grant or change it here. Two things can be set:
+ *   - the DAILY send limit, which belongs to one business, and
+ *   - for a main business only, account-level entitlement overrides (pooled contacts, pooled monthly emails, business
+ *     slots). They are stored once on the account, never copied onto each business. An empty box removes the override.
  */
 export async function updateWorkspaceLimitsAction(formData: FormData) {
   const { user, db } = await requireAdminDb();
   const wid = id(formData);
   if (!wid) return finish(formData, "/workspaces", "err", "That request was invalid. Reload the page and try again.");
   const whole = (k: string, min: number, max: number) => {
-    const v = Number(formData.get(k));
+    const raw = String(formData.get(k) ?? "").trim();
+    if (raw === "") return null;
+    const v = Number(raw);
     return Number.isFinite(v) ? Math.round(Math.min(max, Math.max(min, v))) : NaN;
   };
   const daily = whole("daily", 1, 1_000_000);
-  const contacts = whole("contacts", 1, 10_000_000);
-  if (Number.isNaN(daily) || Number.isNaN(contacts)) return finish(formData, "/workspaces", "err", "Enter whole numbers for the daily send limit and contact limit.");
-  const { error } = await db.from("workspaces").update({ daily_send_limit: daily, max_contacts: contacts }).eq("id", wid);
+  if (daily === null || Number.isNaN(daily)) return finish(formData, "/workspaces", "err", "Enter a whole number for the daily send limit.");
+
+  const { data: row } = await db.from("workspaces").select("id, account_workspace_id, entitlement_overrides").eq("id", wid).maybeSingle();
+  if (!row) return finish(formData, "/workspaces", "err", "That workspace no longer exists.");
+
+  const patch: Record<string, unknown> = { daily_send_limit: daily };
+  const meta: Record<string, unknown> = { daily };
+  if (!row.account_workspace_id) {
+    const next: Record<string, number> = { ...((row.entitlement_overrides ?? {}) as Record<string, number>) };
+    for (const [field, key, max] of [["contacts", "contacts", 10_000_000], ["emails", "monthlySends", 100_000_000], ["businesses", "businesses", 100]] as const) {
+      const v = whole(field, 0, max);
+      if (Number.isNaN(v)) return finish(formData, "/workspaces", "err", "Enter whole numbers for the account overrides, or leave a box empty.");
+      if (v === null) delete next[key]; else next[key] = v;
+      meta[key] = v;
+    }
+    patch.entitlement_overrides = next;
+  }
+  const { error } = await db.from("workspaces").update(patch).eq("id", wid);
   if (error) return finish(formData, "/workspaces", "err", `Couldn’t save the limits: ${error.message}`);
-  await recordAudit(db, user, "workspace.limits", { type: "workspace", id: wid }, { daily, contacts });
+  if (!row.account_workspace_id) await syncEntitlements(db, wid);
+  await recordAudit(db, user, "workspace.limits", { type: "workspace", id: wid }, meta);
   return finish(formData, "/workspaces", "ok", "Limits saved.");
 }
 
@@ -241,4 +264,51 @@ export async function signOutOtherSessionsAction() {
   if (error) return settingsDone("err", `Couldn’t sign out other sessions: ${error.message}`);
   await recordAudit(db, user, "admin.signout_others", { type: "user", id: user.id });
   return settingsDone("ok", "Signed out of all other sessions.");
+}
+
+/** Creates a promo code. Customers enter it on the Billing page; it takes a percentage off a new subscription. */
+export async function createPromoAction(formData: FormData) {
+  const { user, db } = await requireAdminDb();
+  const code = normalizePromoCode(formData.get("code"));
+  if (!code) return go("/promos", "err", "A code is letters, numbers, - and _, 3 to 32 characters.");
+  const percent = Number(formData.get("percent"));
+  if (!Number.isInteger(percent) || percent < 1 || percent > 100) return go("/promos", "err", "Percent off must be a whole number from 1 to 100.");
+  const duration = String(formData.get("duration") ?? "once");
+  if (!["once", "repeating", "forever"].includes(duration)) return go("/promos", "err", "Choose how long the discount lasts.");
+  const months = Number(formData.get("months"));
+  if (duration === "repeating" && !(Number.isInteger(months) && months >= 1 && months <= 36)) return go("/promos", "err", "Enter how many months the discount lasts (1 to 36).");
+  const interval = String(formData.get("interval") ?? "");
+  const picked = formData.getAll("plans").map(String).filter((p) => ["starter", "growth", "pro"].includes(p));
+  const plans = picked.length === 0 || picked.length === 3 ? null : picked;
+  const date = (k: string): string | null => {
+    const v = String(formData.get(k) ?? "").trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : null;
+  };
+  const starts = date("starts");
+  const ends = date("ends");
+  if (starts && ends && ends <= starts) return go("/promos", "err", "The end date must be after the start date.");
+  const max = String(formData.get("max") ?? "").trim() === "" ? null : Number(formData.get("max"));
+  if (max !== null && !(Number.isInteger(max) && max >= 1)) return go("/promos", "err", "Maximum uses must be a whole number, or empty for unlimited.");
+
+  const { error } = await db.from("promo_codes").insert({
+    code, description: String(formData.get("description") ?? "").trim().slice(0, 120) || null,
+    percent_off: percent, duration, duration_months: duration === "repeating" ? months : null,
+    plans, interval: interval === "month" || interval === "year" ? interval : null,
+    starts_at: starts, expires_at: ends, max_redemptions: max, created_by: user.id,
+  });
+  if (error) return go("/promos", "err", error.code === "23505" ? "That code already exists." : `Couldn’t create the code: ${error.message}`);
+  await recordAudit(db, user, "promo.created", { type: "promo", id: code }, { code, percent_off: percent });
+  return go("/promos", "ok", `${code} is live.`);
+}
+
+/** Turns a promo code off or on. People who already used it keep their discount. */
+export async function setPromoActiveAction(formData: FormData) {
+  const { user, db } = await requireAdminDb();
+  const pid = String(formData.get("id") ?? "");
+  const active = String(formData.get("active") ?? "") === "1";
+  if (!pid) return go("/promos", "err", "That request was invalid. Reload the page and try again.");
+  const { data, error } = await db.from("promo_codes").update({ active }).eq("id", pid).select("code").maybeSingle();
+  if (error || !data) return go("/promos", "err", "Couldn’t update that code.");
+  await recordAudit(db, user, active ? "promo.enabled" : "promo.disabled", { type: "promo", id: data.code }, { code: data.code });
+  return go("/promos", "ok", active ? `${data.code} is live again.` : `${data.code} is off.`);
 }

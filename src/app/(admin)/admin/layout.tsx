@@ -13,6 +13,7 @@ const nav: ShellNavItem[] = [
   { label: "Users", href: "/users", icon: "users" },
   { label: "Campaign review", href: "/review", icon: "review" },
   { label: "Abuse reports", href: "/abuse", icon: "flag" },
+  { label: "Promo codes", href: "/promos", icon: "card" },
   { label: "Suppression list", href: "/suppression", icon: "ban" },
   { label: "Audit log", href: "/audit", icon: "history" },
   { label: "Settings", href: "/settings", icon: "settings" },

@@ -36,7 +36,7 @@ export function SiteFooter() {
                 Focused email campaigns with deliverability and compliance built in.
               </p>
             </div>
-            <ButtonLink href="/register" className="mt-6">Start with free plan</ButtonLink>
+            <ButtonLink href="/register" className="mt-6">Start your free trial</ButtonLink>
           </div>
           <Column title="Product" links={siteConfig.footer.product} />
           <Column title="Company" links={siteConfig.footer.company} />

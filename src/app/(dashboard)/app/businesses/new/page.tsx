@@ -5,6 +5,7 @@ import { FormActions } from "@/components/ui/form-actions";
 import { Field, Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ActionButton } from "@/components/ui/submit-button";
+import { plans, planName } from "@/config/plans";
 import { getContext } from "@/lib/workspace";
 import { getBusinessQuota } from "@/server/businesses";
 import { createBusinessAction } from "../actions";
@@ -25,6 +26,7 @@ export default async function NewBusinessPage() {
   }
 
   const full = quota.used >= quota.cap;
+  const next = quota.nextPlan && quota.nextPlan !== "custom" ? plans.find((p) => p.id === quota.nextPlan) ?? null : null;
   return (
     <>
       <PageHeader
@@ -32,11 +34,27 @@ export default async function NewBusinessPage() {
         description="Each business has its own logo, address, sending domains, contacts and unsubscribes. You switch between them from the sidebar."
       />
       <Card className="max-w-xl">
-        <CardHeader title="New business" description={`Your ${quota.main.plan} plan covers ${quota.cap} ${quota.cap === 1 ? "business" : "businesses"}. You’re using ${quota.used}.`} />
-        {full ? (
+        <CardHeader title="New business" description={`Your ${planName(quota.main.plan)} plan covers ${quota.cap} ${quota.cap === 1 ? "business" : "businesses"} on one subscription. You’re using ${quota.used}.`} />
+        {!quota.access.sending ? (
           <div className="space-y-4 p-6">
-            <p className="text-sm text-ink-soft">You’ve used every business your plan includes. Upgrade to add more.</p>
-            <ButtonLink href="/app/billing">See plans</ButtonLink>
+            <p className="text-sm text-ink-soft">{quota.access.reason}</p>
+            <ButtonLink href="/app/billing">Go to billing</ButtonLink>
+          </div>
+        ) : full ? (
+          <div className="space-y-4 p-6">
+            {next ? (
+              <>
+                <p className="text-sm text-ink-soft">
+                  You’ve used every business your plan includes. <strong className="text-ink">{next.name}</strong> covers {next.businesses} for {next.price} a month. It changes the plan on your one subscription. You never get a second subscription, and any days you’ve already paid for are credited.
+                </p>
+                <ButtonLink href="/app/billing#plans">Upgrade to {next.name}</ButtonLink>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-ink-soft">You’ve used every business your plan includes. For more, we set up a Custom plan with limits that suit you.</p>
+                <ButtonLink href="/contact">Contact sales</ButtonLink>
+              </>
+            )}
           </div>
         ) : (
           <form action={createBusinessAction}>

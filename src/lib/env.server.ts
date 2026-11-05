@@ -54,19 +54,34 @@ export const serverEnv = {
   billing: {
     stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    // One entry per plan and billing interval ("starter", "starter_year", ...). Annual entries stay empty until annual billing is switched on.
     stripePrices: {
       starter: process.env.STRIPE_PRICE_STARTER ?? "",
       growth: process.env.STRIPE_PRICE_GROWTH ?? "",
+      pro: process.env.STRIPE_PRICE_PRO ?? "",
+      starter_year: process.env.STRIPE_PRICE_STARTER_YEAR ?? "",
+      growth_year: process.env.STRIPE_PRICE_GROWTH_YEAR ?? "",
+      pro_year: process.env.STRIPE_PRICE_PRO_YEAR ?? "",
     } as Record<string, string>,
     paystackSecretKey: process.env.PAYSTACK_SECRET_KEY ?? "",
+    // Smallest currency unit (kobo for NGN). Also used to work out the prorated upgrade charge.
     paystackAmounts: {
       starter: Number(process.env.PAYSTACK_AMOUNT_STARTER ?? 0),
       growth: Number(process.env.PAYSTACK_AMOUNT_GROWTH ?? 0),
+      pro: Number(process.env.PAYSTACK_AMOUNT_PRO ?? 0),
+      starter_year: Number(process.env.PAYSTACK_AMOUNT_STARTER_YEAR ?? 0),
+      growth_year: Number(process.env.PAYSTACK_AMOUNT_GROWTH_YEAR ?? 0),
+      pro_year: Number(process.env.PAYSTACK_AMOUNT_PRO_YEAR ?? 0),
     } as Record<string, number>,
     paystackPlans: {
       starter: process.env.PAYSTACK_PLAN_STARTER ?? "",
       growth: process.env.PAYSTACK_PLAN_GROWTH ?? "",
+      pro: process.env.PAYSTACK_PLAN_PRO ?? "",
+      starter_year: process.env.PAYSTACK_PLAN_STARTER_YEAR ?? "",
+      growth_year: process.env.PAYSTACK_PLAN_GROWTH_YEAR ?? "",
+      pro_year: process.env.PAYSTACK_PLAN_PRO_YEAR ?? "",
     } as Record<string, string>,
+    paystackCurrency: (process.env.PAYSTACK_CURRENCY ?? "").trim().toUpperCase(),
   },
   limits: {
     newWorkspaceDailySendLimit: Number(process.env.NEW_WORKSPACE_DAILY_SEND_LIMIT ?? 200),

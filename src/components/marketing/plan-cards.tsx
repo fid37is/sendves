@@ -1,12 +1,15 @@
 import { Check } from "lucide-react";
-import { plans } from "@/config/plans";
+import { displayPrice, plans } from "@/config/plans";
+import type { BillingInterval } from "@/config/plan-limits";
 import { ButtonLink } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export function PlanCards() {
+export function PlanCards({ interval = "month" }: { interval?: BillingInterval }) {
   return (
     <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-      {plans.map((plan) => (
+      {plans.map((plan) => {
+        const shown = displayPrice(plan, interval);
+        return (
         <div
           key={plan.id}
           className={cn(
@@ -20,12 +23,14 @@ export function PlanCards() {
           </div>
           <p className="mt-2 min-h-[40px] text-sm text-ink-soft">{plan.blurb}</p>
           <p className="mt-5 flex items-baseline gap-2">
-            <span className="font-display text-4xl font-extrabold text-ink">{plan.price}</span>
-            <span className="text-sm text-ink-muted">{plan.period}</span>
+            <span className="font-display text-4xl font-extrabold text-ink">{shown.price}</span>
+            <span className="text-sm text-ink-muted">{shown.period}</span>
           </p>
+          {interval === "year" && plan.annual ? <p className="mt-1 text-sm font-semibold text-success">{plan.annual.note}. About {plan.annual.perMonth} a month.</p> : null}
           <dl className="mt-5 space-y-1 text-sm">
-            <div className="flex justify-between"><dt className="text-ink-muted">Contacts</dt><dd className="font-semibold text-ink">{plan.contacts}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Sending</dt><dd className="font-semibold text-ink">{plan.sends}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Businesses</dt><dd className="text-right font-semibold text-ink">{plan.businesses}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Contacts</dt><dd className="text-right font-semibold text-ink">{plan.contacts}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Sending</dt><dd className="text-right font-semibold text-ink">{plan.sends}</dd></div>
           </dl>
           <ul className="mt-6 flex-1 space-y-3 border-t border-mist pt-6">
             {plan.features.map((f) => (
@@ -35,11 +40,12 @@ export function PlanCards() {
               </li>
             ))}
           </ul>
-          <ButtonLink href={plan.id === "scale" ? "/contact" : "/register"} variant={plan.highlight ? "primary" : "outline"} className="mt-8 w-full">
+          <ButtonLink href={plan.id === "custom" ? "/contact" : `/register?plan=${plan.id}`} variant={plan.highlight ? "primary" : "outline"} className="mt-8 w-full">
             {plan.cta}
           </ButtonLink>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
